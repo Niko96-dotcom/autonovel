@@ -214,6 +214,10 @@ def uv_run_to_file(script: str, output_path: Path, timeout: int = 600) -> subpro
 
 def git_add_commit(message: str) -> str:
     """Stage all changes and commit. Returns short hash or empty string."""
+    if not (BASE_DIR / ".git").exists():
+        step(f"GIT SKIP: {message} (workspace is not a git checkout)")
+        emit_event("pipeline", "git_skipped", {"message": message})
+        return "no-git"
     run_tool("git add -A")
     result = run_tool(f'git commit -m "{message}" --allow-empty')
     if result.returncode == 0:
@@ -228,6 +232,10 @@ def git_add_commit(message: str) -> str:
 
 def git_reset_hard(ref: str = "HEAD~1"):
     """Hard reset to discard bad changes."""
+    if not (BASE_DIR / ".git").exists():
+        step(f"GIT RESET SKIP: {ref} (workspace is not a git checkout)")
+        emit_event("pipeline", "git_reset_skipped", {"ref": ref})
+        return
     step(f"GIT RESET: {ref}")
     run_tool(f"git reset --hard {ref}")
 
