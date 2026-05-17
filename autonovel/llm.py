@@ -32,7 +32,6 @@ def writer_model(override: str | None = None) -> str:
     return (
         override
         or os.environ.get("WRITER_MODEL")
-        or os.environ.get("AUTONOVEL_WRITER_MODEL")
         or DEFAULT_WRITER_MODEL
     )
 
@@ -42,8 +41,6 @@ def reviewer_model(override: str | None = None) -> str:
     return (
         override
         or os.environ.get("REVIEWER_MODEL")
-        or os.environ.get("AUTONOVEL_REVIEW_MODEL")
-        or os.environ.get("AUTONOVEL_JUDGE_MODEL")
         or DEFAULT_REVIEWER_MODEL
     )
 

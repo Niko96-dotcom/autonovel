@@ -606,18 +606,18 @@ def run_revision(state: dict, max_cycles: int = MAX_REVISION_CYCLES) -> dict:
         prev_score = novel_score
 
     # =========================================================
-    # PHASE 3b: OPUS REVIEW LOOP (deep, prose-level refinement)
+    # PHASE 3b: REVIEWER MODEL LOOP (deep, prose-level refinement)
     # =========================================================
     review_py = BASE_DIR / "review.py"
     if review_py.exists():
-        banner("PHASE 3b: OPUS REVIEW LOOP", "=")
+        banner("PHASE 3b: REVIEWER MODEL LOOP", "=")
         
         max_review_rounds = 4
         for rnd in range(1, max_review_rounds + 1):
-            banner(f"Opus Review Round {rnd}/{max_review_rounds}", "-")
+            banner(f"Reviewer Round {rnd}/{max_review_rounds}", "-")
             
             # Step 1: Generate the review
-            step("Sending manuscript to Opus for review...")
+            step("Sending manuscript to reviewer model...")
             review_result = uv_run(
                 f"review.py --output reviews.md", timeout=900)
             
@@ -669,7 +669,7 @@ def run_revision(state: dict, max_cycles: int = MAX_REVISION_CYCLES) -> dict:
                         step(f"Revising Ch {ch_num} from review brief...")
                         uv_run(f"gen_revision.py {ch_num} {brief}", timeout=600)
                         git_add_commit(
-                            f"review round {rnd}: revise ch{ch_num:02d} from Opus feedback")
+                            f"review round {rnd}: revise ch{ch_num:02d} from reviewer feedback")
             
             # Step 5: Mechanical fixes from review
             # Run slop pass on any mentioned patterns
@@ -683,7 +683,7 @@ def run_revision(state: dict, max_cycles: int = MAX_REVISION_CYCLES) -> dict:
             
             step(f"Review round {rnd} complete.")
         
-        banner("OPUS REVIEW LOOP COMPLETE")
+        banner("REVIEWER MODEL LOOP COMPLETE")
     
     state["phase"] = "export"
     state["current_focus"] = "export"
