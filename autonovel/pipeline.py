@@ -29,6 +29,13 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+RUN_ID = os.environ.get("AUTONOVEL_RUN_ID")
+RUN_DIR = (
+    Path(os.environ["AUTONOVEL_RUN_DIR"]).expanduser().resolve()
+    if os.environ.get("AUTONOVEL_RUN_DIR")
+    else (BASE_DIR / "runs" / RUN_ID if RUN_ID else None)
+)
+EVENTS_FILE = RUN_DIR / "events.jsonl" if RUN_DIR else None
 STATE_FILE = BASE_DIR / "state.json"
 RESULTS_FILE = BASE_DIR / "results.tsv"
 CHAPTERS_DIR = BASE_DIR / "chapters"
@@ -45,6 +52,26 @@ MAX_REVISION_CYCLES = 6
 PLATEAU_DELTA = 0.3
 
 PHASE_ORDER = ["foundation", "drafting", "revision", "export"]
+
+
+# ---------------------------------------------------------------------------
+# Helpers: structured run events
+# ---------------------------------------------------------------------------
+
+def emit_event(phase: str, event_type: str, payload: dict | None = None):
+    """Append a structured event for UI/SSE consumers when a run dir is active."""
+    if not EVENTS_FILE:
+        return
+    EVENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    event = {
+        "ts": datetime.now().isoformat(),
+        "run_id": RUN_ID,
+        "phase": phase,
+        "event_type": event_type,
+        "payload": payload or {},
+    }
+    with open(EVENTS_FILE, "a") as f:
+        f.write(json.dumps(event, default=str) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +105,7 @@ def save_state(state: dict):
     """Write state to state.json."""
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
+    emit_event(state.get("phase", "pipeline"), "state_saved", state)
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +122,13 @@ def log_result(commit: str, phase: str, score, word_count: int,
         RESULTS_FILE.write_text(header)
     with open(RESULTS_FILE, "a") as f:
         f.write(f"{commit}\t{phase}\t{score}\t{word_count}\t{status}\t{description}\n")
+    emit_event(phase, "result_logged", {
+        "commit": commit,
+        "score": score,
+        "word_count": word_count,
+        "status": status,
+        "description": description,
+    })
 
 
 def banner(text: str, char: str = "=", width: int = 60):
@@ -101,12 +136,14 @@ def banner(text: str, char: str = "=", width: int = 60):
     print(f"\n{char * width}")
     print(f"  {text}")
     print(f"{char * width}")
+    emit_event("pipeline", "banner", {"text": text})
 
 
 def step(text: str):
     """Print a step indicator."""
     ts = datetime.now().strftime("%H:%M:%S")
     print(f"  [{ts}] {text}")
+    emit_event("pipeline", "step", {"text": text})
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +157,7 @@ def run_tool(cmd: str, timeout: int = 600, check: bool = False) -> subprocess.Co
     Returns CompletedProcess; never raises unless check=True.
     """
     step(f"RUN: {cmd}")
+    emit_event("pipeline", "tool_started", {"cmd": cmd, "timeout": timeout})
     try:
         result = subprocess.run(
             cmd, shell=True, capture_output=True, text=True,
@@ -133,11 +171,18 @@ def run_tool(cmd: str, timeout: int = 600, check: bool = False) -> subprocess.Co
         if check and result.returncode != 0:
             raise subprocess.CalledProcessError(
                 result.returncode, cmd, result.stdout, result.stderr)
+        emit_event("pipeline", "tool_finished", {
+            "cmd": cmd,
+            "returncode": result.returncode,
+            "stdout_tail": (result.stdout or "")[-2000:],
+            "stderr_tail": (result.stderr or "")[-2000:],
+        })
         return result
     except subprocess.TimeoutExpired:
         print(f"    ERROR: timed out after {timeout}s")
         # Return a fake CompletedProcess for graceful handling
         fake = subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr="TIMEOUT")
+        emit_event("pipeline", "tool_timeout", {"cmd": cmd, "timeout": timeout})
         return fake
 
 
@@ -776,6 +821,13 @@ def run_export(state: dict) -> dict:
 
 def run_pipeline(args):
     """Run the full pipeline or a specific phase."""
+    emit_event("pipeline", "run_started", {
+        "from_scratch": args.from_scratch,
+        "phase": args.phase,
+        "max_cycles": args.max_cycles,
+        "base_dir": str(BASE_DIR),
+        "run_dir": str(RUN_DIR) if RUN_DIR else None,
+    })
 
     # Load or initialize state
     if args.from_scratch:
@@ -825,6 +877,7 @@ def run_pipeline(args):
 
     for phase in phases:
         try:
+            emit_event(phase, "phase_started", {"phase": phase})
             if phase == "foundation":
                 state = run_foundation(state)
             elif phase == "drafting":
@@ -836,13 +889,16 @@ def run_pipeline(args):
             else:
                 print(f"Unknown phase: {phase}")
                 sys.exit(1)
+            emit_event(phase, "phase_finished", {"state": state})
         except KeyboardInterrupt:
             banner("INTERRUPTED — state saved")
             save_state(state)
+            emit_event(phase, "run_interrupted", {"state": state})
             sys.exit(130)
         except Exception as e:
             print(f"\n  FATAL ERROR in {phase}: {e}")
             save_state(state)
+            emit_event(phase, "run_failed", {"error": str(e), "state": state})
             raise
 
     elapsed = datetime.now() - start_time
@@ -856,6 +912,11 @@ def run_pipeline(args):
     print(f"  Words:      {count_words_in_chapters()}")
     print(f"  Novel:      {state.get('novel_score', 0)}")
     print(f"  Cycles:     {state.get('revision_cycle', 0)}")
+    emit_event("pipeline", "run_finished", {
+        "elapsed_seconds": elapsed.total_seconds(),
+        "state": state,
+        "words": count_words_in_chapters(),
+    })
 
 
 def main():
