@@ -2,9 +2,11 @@
 """Build LaTeX source from chapter files."""
 import re
 import os
+from pathlib import Path
 
-CHAPTERS_DIR = "/home/jeffq/autonovel/chapters"
-OUT_DIR = "/home/jeffq/autonovel/typeset"
+BASE_DIR = Path(__file__).resolve().parent.parent
+CHAPTERS_DIR = BASE_DIR / "chapters"
+OUT_DIR = BASE_DIR / "typeset"
 
 def latex_escape(t):
     t = t.replace('&', '\\&')
@@ -91,10 +93,9 @@ def make_drop_cap(latex_body):
     return drop + '\n\n' + rest
 
 chapters_tex = []
-for n in range(1, 20):
-    path = os.path.join(CHAPTERS_DIR, f"ch_{n:02d}.md")
-    with open(path) as f:
-        text = f.read()
+for path in sorted(CHAPTERS_DIR.glob("ch_*.md")):
+    n = int(re.search(r"ch_(\d+)", path.name).group(1))
+    text = path.read_text()
     
     lines = text.strip().split('\n')
     title_line = lines[0].lstrip('# ').strip()
@@ -110,14 +111,13 @@ for n in range(1, 20):
     latex_body = make_drop_cap(latex_body)
     
     # Check for chapter ornament (prefer vector PDF over raster PNG)
-    art_base = os.path.dirname(CHAPTERS_DIR)
-    pdf_path = os.path.join(art_base, "art", "pdf", f"ornament_ch{n:02d}.pdf")
-    png_path = os.path.join(art_base, "art", f"ornament_ch{n:02d}.png")
+    pdf_path = BASE_DIR / "art" / "pdf" / f"ornament_ch{n:02d}.pdf"
+    png_path = BASE_DIR / "art" / f"ornament_ch{n:02d}.png"
     ornament_tex = ""
     ornament_file = None
-    if os.path.exists(pdf_path):
+    if pdf_path.exists():
         ornament_file = pdf_path
-    elif os.path.exists(png_path):
+    elif png_path.exists():
         ornament_file = png_path
     if ornament_file:
         ornament_tex = (
@@ -132,7 +132,7 @@ for n in range(1, 20):
 
 content = '\n\\clearpage\n\n'.join(chapters_tex)
 
-with open(os.path.join(OUT_DIR, "chapters_content.tex"), 'w') as f:
-    f.write(content)
+OUT_DIR.mkdir(exist_ok=True)
+(OUT_DIR / "chapters_content.tex").write_text(content)
 
 print(f"\nWrote {len(chapters_tex)} chapters to typeset/chapters_content.tex")

@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -839,8 +840,7 @@ def run_export(state: dict) -> dict:
         # 5. Typeset with tectonic (if available)
         novel_tex = BASE_DIR / "typeset" / "novel.tex"
         if novel_tex.exists():
-            tectonic_check = run_tool("which tectonic", timeout=10)
-            if tectonic_check.returncode == 0:
+            if shutil.which("tectonic"):
                 step("Typesetting PDF with tectonic...")
                 result = run_tool("tectonic typeset/novel.tex", timeout=300)
                 if result.returncode == 0:
