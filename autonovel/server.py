@@ -195,6 +195,17 @@ async def _start_run_process(run_id: str, config: RunConfig):
         "python",
         "run_pipeline.py",
         "--from-scratch",
+        "--target-chapters",
+        str(config.target_chapters),
+        "--target-word-count",
+        str(config.target_word_count),
+        "--foundation-threshold",
+        str(config.foundation_threshold),
+        "--chapter-threshold",
+        str(config.chapter_threshold),
+        *(["--no-pdf"] if not config.generate_pdf else []),
+        *(["--generate-cover"] if config.generate_cover else []),
+        *(["--generate-audiobook"] if config.generate_audiobook else []),
         cwd=workspace,
         env=env,
         stdout=asyncio.subprocess.PIPE,
@@ -308,4 +319,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-

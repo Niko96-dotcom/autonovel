@@ -43,8 +43,13 @@ BRIEFS_DIR = BASE_DIR / "briefs"
 EDIT_LOGS_DIR = BASE_DIR / "edit_logs"
 EVAL_LOGS_DIR = BASE_DIR / "eval_logs"
 
-FOUNDATION_THRESHOLD = 7.5
-CHAPTER_THRESHOLD = 6.0
+FOUNDATION_THRESHOLD = float(os.environ.get("AUTONOVEL_FOUNDATION_THRESHOLD", "7.5"))
+CHAPTER_THRESHOLD = float(os.environ.get("AUTONOVEL_CHAPTER_THRESHOLD", "6.0"))
+TARGET_CHAPTERS = int(os.environ.get("AUTONOVEL_TARGET_CHAPTERS", "0") or "0")
+TARGET_WORD_COUNT = int(os.environ.get("AUTONOVEL_TARGET_WORD_COUNT", "0") or "0")
+GENERATE_PDF = os.environ.get("AUTONOVEL_GENERATE_PDF", "1") != "0"
+GENERATE_COVER = os.environ.get("AUTONOVEL_GENERATE_COVER", "0") == "1"
+GENERATE_AUDIOBOOK = os.environ.get("AUTONOVEL_GENERATE_AUDIOBOOK", "0") == "1"
 MAX_FOUNDATION_ITERS = 20
 MAX_CHAPTER_ATTEMPTS = 5
 MIN_REVISION_CYCLES = 3
@@ -264,6 +269,8 @@ def count_chapter_files() -> int:
 
 def get_total_chapters(state: dict) -> int:
     """Determine total chapter count from state or outline."""
+    if TARGET_CHAPTERS > 0:
+        return TARGET_CHAPTERS
     if state.get("chapters_total", 0) > 0:
         return state["chapters_total"]
     # Try to infer from outline.md
@@ -781,7 +788,7 @@ def run_export(state: dict) -> dict:
 
     # 4. Build LaTeX
     build_tex = BASE_DIR / "typeset" / "build_tex.py"
-    if build_tex.exists():
+    if GENERATE_PDF and build_tex.exists():
         step("Building LaTeX content...")
         run_tool(f"uv run python typeset/build_tex.py", timeout=120)
 
@@ -799,7 +806,12 @@ def run_export(state: dict) -> dict:
             else:
                 step("tectonic not found, skipping PDF generation")
     else:
-        step("typeset/build_tex.py not found, skipping LaTeX")
+        step("PDF generation disabled or typeset/build_tex.py not found, skipping LaTeX")
+
+    if GENERATE_COVER:
+        step("Cover generation requested; use gen_art.py workflow for curated cover assets")
+    if GENERATE_AUDIOBOOK:
+        step("Audiobook generation requested; use gen_audiobook_script.py and gen_audiobook.py after manuscript export")
 
     # 6. Final commit
     commit_hash = git_add_commit("export: manuscript, outline, arc summary, PDF")
@@ -819,14 +831,48 @@ def run_export(state: dict) -> dict:
 # Main orchestrator
 # ---------------------------------------------------------------------------
 
+def apply_config_overrides(args):
+    """Apply CLI/UI config overrides to module-level pipeline settings."""
+    global FOUNDATION_THRESHOLD
+    global CHAPTER_THRESHOLD
+    global TARGET_CHAPTERS
+    global TARGET_WORD_COUNT
+    global GENERATE_PDF
+    global GENERATE_COVER
+    global GENERATE_AUDIOBOOK
+
+    if getattr(args, "foundation_threshold", None) is not None:
+        FOUNDATION_THRESHOLD = args.foundation_threshold
+    if getattr(args, "chapter_threshold", None) is not None:
+        CHAPTER_THRESHOLD = args.chapter_threshold
+    if getattr(args, "target_chapters", None) is not None:
+        TARGET_CHAPTERS = args.target_chapters
+    if getattr(args, "target_word_count", None) is not None:
+        TARGET_WORD_COUNT = args.target_word_count
+    if getattr(args, "no_pdf", False):
+        GENERATE_PDF = False
+    if getattr(args, "generate_cover", False):
+        GENERATE_COVER = True
+    if getattr(args, "generate_audiobook", False):
+        GENERATE_AUDIOBOOK = True
+
+
 def run_pipeline(args):
     """Run the full pipeline or a specific phase."""
+    apply_config_overrides(args)
     emit_event("pipeline", "run_started", {
         "from_scratch": args.from_scratch,
         "phase": args.phase,
         "max_cycles": args.max_cycles,
         "base_dir": str(BASE_DIR),
         "run_dir": str(RUN_DIR) if RUN_DIR else None,
+        "target_chapters": TARGET_CHAPTERS,
+        "target_word_count": TARGET_WORD_COUNT,
+        "foundation_threshold": FOUNDATION_THRESHOLD,
+        "chapter_threshold": CHAPTER_THRESHOLD,
+        "generate_pdf": GENERATE_PDF,
+        "generate_cover": GENERATE_COVER,
+        "generate_audiobook": GENERATE_AUDIOBOOK,
     })
 
     # Load or initialize state
@@ -943,6 +989,27 @@ Examples:
     parser.add_argument(
         "--max-cycles", type=int, default=None,
         help=f"Maximum revision cycles (default: {MAX_REVISION_CYCLES})")
+    parser.add_argument(
+        "--target-chapters", type=int, default=None,
+        help="Override chapter count for this run")
+    parser.add_argument(
+        "--target-word-count", type=int, default=None,
+        help="Record target word count for this run")
+    parser.add_argument(
+        "--foundation-threshold", type=float, default=None,
+        help=f"Foundation pass threshold (default: {FOUNDATION_THRESHOLD})")
+    parser.add_argument(
+        "--chapter-threshold", type=float, default=None,
+        help=f"Chapter pass threshold (default: {CHAPTER_THRESHOLD})")
+    parser.add_argument(
+        "--no-pdf", action="store_true",
+        help="Skip LaTeX/PDF export")
+    parser.add_argument(
+        "--generate-cover", action="store_true",
+        help="Mark cover generation as requested")
+    parser.add_argument(
+        "--generate-audiobook", action="store_true",
+        help="Mark audiobook generation as requested")
 
     args = parser.parse_args()
     run_pipeline(args)
