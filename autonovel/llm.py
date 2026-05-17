@@ -206,3 +206,35 @@ def complete_sync(
             retry_base_seconds=retry_base_seconds,
         )
     )
+
+
+def complete_prompt_sync(
+    prompt: str,
+    *,
+    system: str | None = None,
+    slot: ModelSlot = "writer",
+    model: str | None = None,
+    temperature: float = 0.7,
+    max_tokens: int = 4000,
+    response_format: dict[str, Any] | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    retry_base_seconds: float = DEFAULT_RETRY_BASE_SECONDS,
+) -> str:
+    """Complete a single prompt using optional OpenAI system/user messages."""
+    messages: list[Message] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+    return complete_sync(
+        messages,
+        model=model_for_slot(slot, model),
+        temperature=temperature,
+        max_tokens=max_tokens,
+        response_format=response_format,
+        api_key=api_key,
+        base_url=base_url,
+        max_retries=max_retries,
+        retry_base_seconds=retry_base_seconds,
+    )
