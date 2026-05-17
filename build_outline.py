@@ -42,8 +42,10 @@ def main():
     
     entries = []
     
-    for ch in range(1, 20):
-        path = CHAPTERS_DIR / f"ch_{ch:02d}.md"
+    chapter_files = sorted(CHAPTERS_DIR.glob("ch_*.md"))
+
+    for path in chapter_files:
+        ch = int(re.search(r"ch_(\d+)", path.name).group(1))
         text = path.read_text()
         wc = len(text.split())
         
