@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Deep manuscript review via Opus.
+Deep manuscript review via the reviewer model.
 
-Sends the full novel to Claude Opus for dual-persona review:
+Sends the full novel to the reviewer model for dual-persona review:
   1. Literary critic (newspaper book review style)
   2. Professor of fiction (specific, actionable craft suggestions)
 
@@ -11,7 +11,6 @@ Usage:
   python review.py --output reviews.md  # Also save human-readable copy
   python review.py --parse            # Parse last review into actionable items
 """
-import os
 import sys
 import json
 import re
@@ -20,13 +19,10 @@ from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 
+from autonovel.llm import LLMConfigurationError, complete_prompt_sync, reviewer_model
+
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env", override=True)
-
-# Use Opus for reviews — it's the best at literary analysis
-REVIEW_MODEL = os.environ.get("AUTONOVEL_REVIEW_MODEL", "claude-opus-4-6")
-API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-API_BASE = os.environ.get("AUTONOVEL_API_BASE_URL", "https://api.anthropic.com")
 
 CHAPTERS_DIR = BASE_DIR / "chapters"
 LOGS_DIR = BASE_DIR / "edit_logs"
@@ -36,28 +32,16 @@ REVIEW_PROMPT = """Read the below novel, "{title}". Review it first as a literar
 {manuscript}"""
 
 
-def call_opus(prompt, max_tokens=8000):
-    """Call Opus with the full manuscript."""
-    import httpx
-    headers = {
-        "x-api-key": API_KEY,
-        "anthropic-version": "2023-06-01",
-        "anthropic-beta": "context-1m-2025-08-07",
-        "content-type": "application/json",
-    }
-    payload = {
-        "model": REVIEW_MODEL,
-        "max_tokens": max_tokens,
-        "temperature": 0.3,
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    print(f"Sending to {REVIEW_MODEL} ({len(prompt):,} chars)...", file=sys.stderr)
-    resp = httpx.post(
-        f"{API_BASE}/v1/messages",
-        headers=headers, json=payload, timeout=600,
+def call_reviewer(prompt, max_tokens=8000):
+    """Call the reviewer model with the full manuscript."""
+    model = reviewer_model()
+    print(f"Sending to {model} ({len(prompt):,} chars)...", file=sys.stderr)
+    return complete_prompt_sync(
+        prompt,
+        slot="reviewer",
+        max_tokens=max_tokens,
+        temperature=0.3,
     )
-    resp.raise_for_status()
-    return resp.json()["content"][0]["text"]
 
 
 def get_title():
@@ -212,7 +196,7 @@ def cmd_review(args):
     
     prompt = REVIEW_PROMPT.format(title=title, manuscript=manuscript)
     
-    review_text = call_opus(prompt)
+    review_text = call_reviewer(prompt)
     
     # Save raw review
     LOGS_DIR.mkdir(exist_ok=True)
@@ -273,20 +257,20 @@ def cmd_parse(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Deep manuscript review via Opus")
+    parser = argparse.ArgumentParser(description="Deep manuscript review via the reviewer model")
     parser.add_argument("--output", "-o", default=None, help="Save human-readable review to file")
     parser.add_argument("--parse", action="store_true", help="Parse most recent review")
     
     args = parser.parse_args()
     
-    if not API_KEY:
-        print("ERROR: ANTHROPIC_API_KEY not set in .env", file=sys.stderr)
+    try:
+        if args.parse:
+            cmd_parse(args)
+        else:
+            cmd_review(args)
+    except LLMConfigurationError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
         sys.exit(1)
-    
-    if args.parse:
-        cmd_parse(args)
-    else:
-        cmd_review(args)
 
 
 if __name__ == "__main__":
