@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -229,6 +229,10 @@ def create_app() -> FastAPI:
         if not index_path.exists():
             raise HTTPException(status_code=500, detail="Web UI not built")
         return HTMLResponse(index_path.read_text())
+
+    @app.get("/favicon.ico")
+    async def favicon():
+        return Response(status_code=204)
 
     @app.post("/api/runs")
     async def create_run(config: RunConfig):
