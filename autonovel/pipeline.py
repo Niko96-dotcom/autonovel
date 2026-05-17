@@ -24,6 +24,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from autonovel.pdf_export import write_simple_pdf
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -829,6 +831,7 @@ def run_export(state: dict) -> dict:
 
     # 4. Build LaTeX
     build_tex = BASE_DIR / "typeset" / "build_tex.py"
+    pdf_generated = False
     if GENERATE_PDF and build_tex.exists():
         step("Building LaTeX content...")
         run_tool(f"uv run python typeset/build_tex.py", timeout=120)
@@ -842,12 +845,22 @@ def run_export(state: dict) -> dict:
                 result = run_tool("tectonic typeset/novel.tex", timeout=300)
                 if result.returncode == 0:
                     step("PDF generated: typeset/novel.pdf")
+                    pdf_generated = True
                 else:
                     step("WARNING: tectonic typesetting failed")
             else:
                 step("tectonic not found, skipping PDF generation")
     else:
         step("PDF generation disabled or typeset/build_tex.py not found, skipping LaTeX")
+
+    if GENERATE_PDF and not pdf_generated and manuscript.exists():
+        fallback_pdf = BASE_DIR / "typeset" / "novel.pdf"
+        write_simple_pdf(manuscript.read_text(), fallback_pdf)
+        step(f"Fallback PDF generated: {fallback_pdf.relative_to(BASE_DIR)}")
+        emit_event("export", "artifact_written", {
+            "path": str(fallback_pdf.relative_to(BASE_DIR)),
+            "bytes": fallback_pdf.stat().st_size,
+        })
 
     if GENERATE_COVER:
         step("Cover generation requested; use gen_art.py workflow for curated cover assets")
