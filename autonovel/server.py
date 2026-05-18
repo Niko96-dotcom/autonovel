@@ -19,12 +19,73 @@ from pydantic import BaseModel, Field
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RUNS_DIR = PROJECT_ROOT / "runs"
 WEB_DIR = PROJECT_ROOT / "web"
+SECRETS_PATH = PROJECT_ROOT / ".autonovel-secrets.json"
 
 PROCESSES: dict[str, asyncio.subprocess.Process] = {}
 
+PROVIDERS: dict[str, dict[str, Any]] = {
+    "openai": {
+        "id": "openai",
+        "name": "OpenAI",
+        "base_url": "",
+        "writer_model": "gpt-4o-mini",
+        "reviewer_model": "gpt-4o-mini",
+        "models": ["gpt-4o-mini", "gpt-4o", "gpt-5-mini"],
+    },
+    "opencode-go": {
+        "id": "opencode-go",
+        "name": "OpenCode Go",
+        "base_url": "https://opencode.ai/zen/go/v1",
+        "writer_model": "minimax-m2.7",
+        "reviewer_model": "minimax-m2.7",
+        "models": [
+            "minimax-m2.7",
+            "minimax-m2.5",
+            "kimi-k2.6",
+            "kimi-k2.5",
+            "glm-5.1",
+            "glm-5",
+            "deepseek-v4-pro",
+            "deepseek-v4-flash",
+            "qwen3.6-plus",
+            "qwen3.5-plus",
+            "mimo-v2-pro",
+            "mimo-v2-omni",
+            "mimo-v2.5-pro",
+            "mimo-v2.5",
+            "hy3-preview",
+        ],
+    },
+    "minimax": {
+        "id": "minimax",
+        "name": "MiniMax",
+        "base_url": "https://api.minimax.io/v1",
+        "writer_model": "MiniMax-M2.7",
+        "reviewer_model": "MiniMax-M2.7",
+        "models": [
+            "MiniMax-M2.7",
+            "MiniMax-M2.7-highspeed",
+            "MiniMax-M2.5",
+            "MiniMax-M2.5-highspeed",
+            "MiniMax-M2.1",
+            "MiniMax-M2.1-highspeed",
+            "MiniMax-M2",
+        ],
+    },
+    "deepseek": {
+        "id": "deepseek",
+        "name": "DeepSeek",
+        "base_url": "https://api.deepseek.com",
+        "writer_model": "deepseek-v4-pro",
+        "reviewer_model": "deepseek-v4-pro",
+        "models": ["deepseek-v4-pro", "deepseek-v4-flash"],
+    },
+}
+
 
 class RunConfig(BaseModel):
-    openai_api_key: str = Field(min_length=1)
+    provider_id: str = "openai"
+    openai_api_key: str | None = None
     openai_base_url: str | None = None
     fal_key: str | None = None
     elevenlabs_api_key: str | None = None
@@ -39,6 +100,11 @@ class RunConfig(BaseModel):
     generate_cover: bool = False
     generate_audiobook: bool = False
     generate_pdf: bool = True
+
+
+class ProviderKeyConfig(BaseModel):
+    provider_id: str
+    api_key: str = Field(min_length=1)
 
 
 def _now() -> str:
@@ -59,6 +125,47 @@ def _events_path(run_id: str) -> Path:
 
 def _workspace_path(run_id: str) -> Path:
     return _run_dir(run_id) / "workspace"
+
+
+def _load_secrets() -> dict[str, Any]:
+    if not SECRETS_PATH.exists():
+        return {"providers": {}}
+    try:
+        data = json.loads(SECRETS_PATH.read_text())
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail=f"Invalid local secrets file: {exc}") from exc
+    if not isinstance(data, dict):
+        return {"providers": {}}
+    data.setdefault("providers", {})
+    return data
+
+
+def _write_secrets(data: dict[str, Any]):
+    SECRETS_PATH.write_text(json.dumps(data, indent=2) + "\n")
+    os.chmod(SECRETS_PATH, 0o600)
+
+
+def _saved_provider_key(provider_id: str) -> str | None:
+    provider = _load_secrets().get("providers", {}).get(provider_id, {})
+    key = provider.get("api_key")
+    return key if isinstance(key, str) and key else None
+
+
+def _provider_payload(provider_id: str, provider: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **provider,
+        "has_saved_key": bool(_saved_provider_key(provider_id)),
+    }
+
+
+def _resolve_api_key(config: RunConfig) -> tuple[str, str]:
+    runtime_key = (config.openai_api_key or "").strip()
+    if runtime_key:
+        return runtime_key, "runtime"
+    saved_key = _saved_provider_key(config.provider_id)
+    if saved_key:
+        return saved_key, "saved"
+    raise HTTPException(status_code=400, detail="API key is required. Paste one or save a key for this provider.")
 
 
 def _redacted_config(config: RunConfig) -> dict[str, Any]:
@@ -97,6 +204,8 @@ def _ignore_workspace_entries(_: str, names: list[str]) -> set[str]:
         ".venv",
         ".pytest_cache",
         "__pycache__",
+        ".autonovel-secrets.json",
+        ".env",
         "runs",
         "node_modules",
         "dist",
@@ -228,14 +337,35 @@ def create_app() -> FastAPI:
         index_path = WEB_DIR / "index.html"
         if not index_path.exists():
             raise HTTPException(status_code=500, detail="Web UI not built")
-        return HTMLResponse(index_path.read_text())
+        return HTMLResponse(index_path.read_text(), headers={"Cache-Control": "no-store"})
 
     @app.get("/favicon.ico")
     async def favicon():
         return Response(status_code=204)
 
+    @app.get("/api/providers")
+    async def providers():
+        return {"providers": [_provider_payload(provider_id, provider) for provider_id, provider in PROVIDERS.items()]}
+
+    @app.post("/api/provider-keys")
+    async def save_provider_key(config: ProviderKeyConfig):
+        if config.provider_id not in PROVIDERS:
+            raise HTTPException(status_code=400, detail="Unknown provider")
+        data = _load_secrets()
+        data.setdefault("providers", {})[config.provider_id] = {"api_key": config.api_key.strip()}
+        _write_secrets(data)
+        return {"providers": [_provider_payload(provider_id, provider) for provider_id, provider in PROVIDERS.items()]}
+
     @app.post("/api/runs")
     async def create_run(config: RunConfig):
+        if config.provider_id not in PROVIDERS:
+            raise HTTPException(status_code=400, detail="Unknown provider")
+        provider = PROVIDERS[config.provider_id]
+        resolved_key, key_source = _resolve_api_key(config)
+        config = config.model_copy(update={
+            "openai_api_key": resolved_key,
+            "openai_base_url": config.openai_base_url if config.openai_base_url is not None else provider["base_url"],
+        })
         run_id = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
         run_dir = _run_dir(run_id)
         run_dir.mkdir(parents=True, exist_ok=False)
@@ -245,7 +375,7 @@ def create_app() -> FastAPI:
             "status": "queued",
             "created_at": _now(),
             "updated_at": _now(),
-            "config": _redacted_config(config),
+            "config": {**_redacted_config(config), "api_key_source": key_source},
             "events_path": str(_events_path(run_id)),
             "workspace_path": str(_workspace_path(run_id)),
         }

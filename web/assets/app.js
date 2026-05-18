@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 const h = React.createElement;
 
 const DEFAULT_FORM = {
+  provider_id: "openai",
   openai_api_key: "",
   openai_base_url: "",
   fal_key: "",
@@ -23,18 +24,21 @@ const DEFAULT_FORM = {
 
 const FOUNDATION_FILES = ["world.md", "characters.md", "outline.md", "voice.md", "canon.md", "MYSTERY.md"];
 const TABS = ["Foundation", "Drafting", "Revision", "Final review", "Export"];
-const PROVIDERS = [
-  { name: "OpenAI", baseUrl: "", writer: "gpt-4o-mini", reviewer: "gpt-4o-mini" },
-  { name: "OpenCode Go", baseUrl: "https://opencode.ai/zen/go/v1", writer: "minimax-m2.7", reviewer: "minimax-m2.7" },
-  { name: "MiniMax", baseUrl: "https://api.minimax.io/v1", writer: "MiniMax-M2.7", reviewer: "MiniMax-M2.7" },
-];
-const MODEL_GROUPS = [
+const DEFAULT_PROVIDERS = [
   {
-    label: "OpenAI",
+    id: "openai",
+    name: "OpenAI",
+    base_url: "",
+    writer_model: "gpt-4o-mini",
+    reviewer_model: "gpt-4o-mini",
     models: ["gpt-4o-mini", "gpt-4o", "gpt-5-mini"],
   },
   {
-    label: "OpenCode Go",
+    id: "opencode-go",
+    name: "OpenCode Go",
+    base_url: "https://opencode.ai/zen/go/v1",
+    writer_model: "minimax-m2.7",
+    reviewer_model: "minimax-m2.7",
     models: [
       "minimax-m2.7",
       "minimax-m2.5",
@@ -54,7 +58,11 @@ const MODEL_GROUPS = [
     ],
   },
   {
-    label: "MiniMax",
+    id: "minimax",
+    name: "MiniMax",
+    base_url: "https://api.minimax.io/v1",
+    writer_model: "MiniMax-M2.7",
+    reviewer_model: "MiniMax-M2.7",
     models: [
       "MiniMax-M2.7",
       "MiniMax-M2.7-highspeed",
@@ -65,8 +73,15 @@ const MODEL_GROUPS = [
       "MiniMax-M2",
     ],
   },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    base_url: "https://api.deepseek.com",
+    writer_model: "deepseek-v4-pro",
+    reviewer_model: "deepseek-v4-pro",
+    models: ["deepseek-v4-pro", "deepseek-v4-flash"],
+  },
 ];
-const KNOWN_MODELS = new Set(MODEL_GROUPS.flatMap((group) => group.models));
 
 function api(path, options) {
   return fetch(path, options).then(async (res) => {
@@ -105,6 +120,7 @@ function newestPhase(events) {
 
 function App() {
   const [form, setForm] = useState(DEFAULT_FORM);
+  const [providers, setProviders] = useState(DEFAULT_PROVIDERS);
   const [runs, setRuns] = useState([]);
   const [selected, setSelected] = useState(null);
   const [events, setEvents] = useState([]);
@@ -112,13 +128,21 @@ function App() {
   const [artifactText, setArtifactText] = useState("");
   const [artifactPath, setArtifactPath] = useState("");
   const [error, setError] = useState("");
+  const [providerMessage, setProviderMessage] = useState("");
 
   const artifacts = selected?.artifacts || [];
   const grouped = useMemo(() => groupArtifacts(artifacts), [artifacts]);
   const manifest = selected?.manifest;
   const running = manifest?.status === "running";
   const currentPhase = newestPhase(events);
-  const canStart = form.openai_api_key.trim() && form.seed_concept.trim();
+  const selectedProvider = providers.find((provider) => provider.id === form.provider_id) || providers[0];
+  const hasUsableKey = Boolean(form.openai_api_key.trim() || selectedProvider?.has_saved_key);
+  const canStart = hasUsableKey && form.seed_concept.trim();
+
+  async function refreshProviders() {
+    const data = await api("/api/providers");
+    setProviders(data.providers);
+  }
 
   async function refreshRuns() {
     const data = await api("/api/runs");
@@ -134,6 +158,7 @@ function App() {
   }
 
   useEffect(() => {
+    refreshProviders().catch((err) => setError(err.message));
     refreshRuns().catch((err) => setError(err.message));
   }, []);
 
@@ -151,6 +176,23 @@ function App() {
 
   function update(name, value) {
     setForm((prev) => ({ ...prev, [name]: value }));
+  }
+
+  async function saveProviderKey() {
+    setError("");
+    setProviderMessage("");
+    try {
+      const data = await api("/api/provider-keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider_id: form.provider_id, api_key: form.openai_api_key }),
+      });
+      setProviders(data.providers);
+      setForm((prev) => ({ ...prev, openai_api_key: "" }));
+      setProviderMessage(`Saved key for ${selectedProvider?.name || "provider"}.`);
+    } catch (err) {
+      setError(err.message);
+    }
   }
 
   async function startRun() {
@@ -205,7 +247,7 @@ function App() {
       )
     ),
     h("main", { className: "mx-auto grid max-w-7xl grid-cols-[360px_1fr_260px] gap-5 px-5 py-5" },
-      h(SetupPanel, { form, update, canStart, startRun }),
+      h(SetupPanel, { form, update, providers, selectedProvider, providerMessage, saveProviderKey, canStart, startRun }),
       h(RunView, { manifest, events, grouped, activeTab, setActiveTab, openArtifact, artifactText, artifactPath }),
       h(History, { runs, loadRun })
     ),
@@ -213,32 +255,45 @@ function App() {
   );
 }
 
-function SetupPanel({ form, update, canStart, startRun }) {
+function SetupPanel({ form, update, providers, selectedProvider, providerMessage, saveProviderKey, canStart, startRun }) {
   function applyProvider(provider) {
-    update("openai_base_url", provider.baseUrl);
-    update("writer_model", provider.writer);
-    update("reviewer_model", provider.reviewer);
+    setProviderForm(provider);
+  }
+
+  function setProviderForm(provider) {
+    update("provider_id", provider.id);
+    update("openai_base_url", provider.base_url);
+    update("writer_model", provider.writer_model);
+    update("reviewer_model", provider.reviewer_model);
+    update("openai_api_key", "");
   }
 
   return h("section", { className: "space-y-4" },
     h("div", { className: "rounded border border-zinc-200 bg-white p-4" },
       h("h2", { className: "mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500" }, "Setup"),
-      h("div", { className: "mb-3 grid grid-cols-3 gap-2" }, PROVIDERS.map((provider) =>
+      h("div", { className: "mb-3 grid grid-cols-2 gap-2" }, providers.map((provider) =>
         h("button", {
           key: provider.name,
           type: "button",
-          className: `rounded border px-2 py-2 text-xs ${form.openai_base_url === provider.baseUrl ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-300 bg-white"}`,
+          className: `rounded border px-2 py-2 text-xs ${form.provider_id === provider.id ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-300 bg-white"}`,
           onClick: () => applyProvider(provider),
-        }, provider.name)
+        }, `${provider.name}${provider.has_saved_key ? " *" : ""}`)
       )),
-      field("API key", "openai_api_key", "password", form, update),
+      field("API key", "openai_api_key", "password", form, update, { placeholder: selectedProvider?.has_saved_key ? "Saved key will be used" : "Paste key, then Save key" }),
+      h("button", {
+        type: "button",
+        className: "mb-3 w-full rounded border border-zinc-300 px-3 py-2 text-sm disabled:opacity-40",
+        disabled: !form.provider_id || !form.openai_api_key.trim(),
+        onClick: saveProviderKey,
+      }, `Save ${selectedProvider?.name || "provider"} key`),
+      providerMessage && h("div", { className: "mb-3 rounded bg-emerald-50 px-3 py-2 text-xs text-emerald-800" }, providerMessage),
       field("Base URL", "openai_base_url", "text", form, update),
       field("FAL key", "fal_key", "password", form, update),
       field("ElevenLabs key", "elevenlabs_api_key", "password", form, update),
       field("Writer model", "writer_model", "text", form, update),
-      modelSelect("Writer preset", "writer_model", form, update),
+      modelSelect("Writer preset", "writer_model", form, update, providers),
       field("Reviewer model", "reviewer_model", "text", form, update),
-      modelSelect("Reviewer preset", "reviewer_model", form, update)
+      modelSelect("Reviewer preset", "reviewer_model", form, update, providers)
     ),
     h("div", { className: "rounded border border-zinc-200 bg-white p-4" },
       h("h2", { className: "mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500" }, "Pipeline"),
@@ -256,10 +311,10 @@ function SetupPanel({ form, update, canStart, startRun }) {
   );
 }
 
-function field(label, name, type, form, update) {
+function field(label, name, type, form, update, options = {}) {
   return h("label", { className: "mb-3 block text-sm" },
     h("span", { className: "mb-1 block text-zinc-600" }, label),
-    h("input", { className: "w-full rounded border border-zinc-300 px-3 py-2", type, value: form[name] ?? "", onChange: (e) => update(name, type === "number" ? Number(e.target.value) : e.target.value) })
+    h("input", { className: "w-full rounded border border-zinc-300 px-3 py-2", type, value: form[name] ?? "", placeholder: options.placeholder || "", onChange: (e) => update(name, type === "number" ? Number(e.target.value) : e.target.value) })
   );
 }
 
@@ -277,8 +332,9 @@ function toggle(label, name, form, update) {
   );
 }
 
-function modelSelect(label, name, form, update) {
+function modelSelect(label, name, form, update, providers) {
   const current = form[name] ?? "";
+  const knownModels = new Set(providers.flatMap((provider) => provider.models || []));
   return h("label", { className: "mb-3 block text-sm" },
     h("span", { className: "mb-1 block text-zinc-600" }, label),
     h("select", {
@@ -287,10 +343,10 @@ function modelSelect(label, name, form, update) {
       onChange: (event) => update(name, event.target.value),
     },
       h("option", { value: "" }, "Custom"),
-      current && !KNOWN_MODELS.has(current) && h("option", { value: current }, current),
-      MODEL_GROUPS.map((group) =>
-        h("optgroup", { key: group.label, label: group.label }, group.models.map((model) =>
-          h("option", { key: `${group.label}:${model}`, value: model }, model)
+      current && !knownModels.has(current) && h("option", { value: current }, current),
+      providers.map((provider) =>
+        h("optgroup", { key: provider.id, label: provider.name }, (provider.models || []).map((model) =>
+          h("option", { key: `${provider.id}:${model}`, value: model }, model)
         ))
       )
     )
