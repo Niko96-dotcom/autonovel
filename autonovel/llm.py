@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from collections.abc import AsyncIterator, Sequence
 from typing import Any, Literal, overload
 
@@ -62,6 +63,14 @@ def _api_key(runtime_api_key: str | None = None) -> str:
 
 def _base_url(runtime_base_url: str | None = None) -> str | None:
     return runtime_base_url or os.environ.get("OPENAI_BASE_URL") or None
+
+
+def _uses_minimax(base_url: str | None) -> bool:
+    return bool(base_url and "minimax.io" in base_url.lower())
+
+
+def _strip_reasoning_tags(text: str) -> str:
+    return re.sub(r"(?s)<think>.*?</think>\s*", "", text).strip()
 
 
 def _client(
@@ -161,10 +170,13 @@ async def complete(
         "max_tokens": max_tokens,
         "stream": stream,
     }
+    resolved_base_url = _base_url(base_url)
+    if _uses_minimax(resolved_base_url):
+        payload["extra_body"] = {"reasoning_split": True}
     if response_format is not None:
         payload["response_format"] = response_format
 
-    client = _client(api_key=api_key, base_url=base_url)
+    client = _client(api_key=api_key, base_url=resolved_base_url)
     response = await _create_with_retries(
         client=client,
         payload=payload,
@@ -173,7 +185,7 @@ async def complete(
     )
     if stream:
         return _stream_text(response)
-    return response.choices[0].message.content or ""
+    return _strip_reasoning_tags(response.choices[0].message.content or "")
 
 
 def complete_sync(
