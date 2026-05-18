@@ -53,6 +53,7 @@ TARGET_WORD_COUNT = int(os.environ.get("AUTONOVEL_TARGET_WORD_COUNT", "0") or "0
 GENERATE_PDF = os.environ.get("AUTONOVEL_GENERATE_PDF", "1") != "0"
 GENERATE_COVER = os.environ.get("AUTONOVEL_GENERATE_COVER", "0") == "1"
 GENERATE_AUDIOBOOK = os.environ.get("AUTONOVEL_GENERATE_AUDIOBOOK", "0") == "1"
+LLM_TOOL_TIMEOUT = int(os.environ.get("AUTONOVEL_LLM_TOOL_TIMEOUT", "900"))
 MAX_FOUNDATION_ITERS = 20
 MAX_CHAPTER_ATTEMPTS = 5
 MIN_REVISION_CYCLES = 3
@@ -326,18 +327,18 @@ def run_foundation(state: dict) -> dict:
 
         # 1. Generate planning documents
         step("Generating world bible...")
-        uv_run_to_file("gen_world.py", BASE_DIR / "world.md", timeout=300)
+        uv_run_to_file("gen_world.py", BASE_DIR / "world.md", timeout=LLM_TOOL_TIMEOUT)
 
         step("Generating characters...")
-        uv_run_to_file("gen_characters.py", BASE_DIR / "characters.md", timeout=300)
+        uv_run_to_file("gen_characters.py", BASE_DIR / "characters.md", timeout=LLM_TOOL_TIMEOUT)
 
         step("Generating outline (part 1)...")
-        outline_part1 = uv_run("gen_outline.py", timeout=300)
+        outline_part1 = uv_run("gen_outline.py", timeout=LLM_TOOL_TIMEOUT)
         if outline_part1.returncode == 0 and outline_part1.stdout.strip():
             Path("/tmp/outline_output.md").write_text(outline_part1.stdout)
 
         step("Generating outline (part 2 — foreshadowing)...")
-        outline_part2 = uv_run("gen_outline_part2.py", timeout=300)
+        outline_part2 = uv_run("gen_outline_part2.py", timeout=LLM_TOOL_TIMEOUT)
         if outline_part1.returncode == 0 and outline_part2.returncode == 0:
             outline = "\n\n".join(
                 part.strip()
@@ -352,7 +353,7 @@ def run_foundation(state: dict) -> dict:
                 })
 
         step("Generating canon...")
-        uv_run_to_file("gen_canon.py", BASE_DIR / "canon.md", timeout=300)
+        uv_run_to_file("gen_canon.py", BASE_DIR / "canon.md", timeout=LLM_TOOL_TIMEOUT)
 
         if count_chapter_files() > 0:
             step("Running voice fingerprint...")
@@ -362,7 +363,7 @@ def run_foundation(state: dict) -> dict:
 
         # 2. Evaluate
         step("Evaluating foundation...")
-        eval_result = uv_run("evaluate.py --phase=foundation", timeout=300)
+        eval_result = uv_run("evaluate.py --phase=foundation", timeout=LLM_TOOL_TIMEOUT)
         score = parse_score(eval_result.stdout, "overall_score")
         lore = parse_lore_score(eval_result.stdout)
 
