@@ -1,6 +1,7 @@
 eval_logs/
 edit_logs/
 briefs/
+runs/
 __pycache__/
 *.pyc
 .env
