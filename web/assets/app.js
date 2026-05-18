@@ -23,6 +23,75 @@ const DEFAULT_FORM = {
 
 const FOUNDATION_FILES = ["world.md", "characters.md", "outline.md", "voice.md", "canon.md", "MYSTERY.md"];
 const TABS = ["Foundation", "Drafting", "Revision", "Final review", "Export"];
+const PROVIDERS = [
+  { name: "OpenAI", baseUrl: "", writer: "gpt-4o-mini", reviewer: "gpt-4o-mini" },
+  { name: "OpenCode Zen", baseUrl: "https://opencode.ai/zen/v1", writer: "nemotron-3-super-free", reviewer: "nemotron-3-super-free" },
+  { name: "MiniMax", baseUrl: "https://api.minimax.io/v1", writer: "MiniMax-M2.7", reviewer: "MiniMax-M2.7" },
+];
+const MODEL_GROUPS = [
+  {
+    label: "OpenAI",
+    models: ["gpt-4o-mini", "gpt-4o", "gpt-5-mini"],
+  },
+  {
+    label: "OpenCode Zen",
+    models: [
+      "claude-opus-4-7",
+      "claude-opus-4-6",
+      "claude-opus-4-5",
+      "claude-opus-4-1",
+      "claude-sonnet-4-6",
+      "claude-sonnet-4-5",
+      "claude-sonnet-4",
+      "claude-haiku-4-5",
+      "gemini-3.1-pro",
+      "gemini-3-flash",
+      "gpt-5.5",
+      "gpt-5.5-pro",
+      "gpt-5.4",
+      "gpt-5.4-pro",
+      "gpt-5.4-mini",
+      "gpt-5.4-nano",
+      "gpt-5.3-codex-spark",
+      "gpt-5.3-codex",
+      "gpt-5.2",
+      "gpt-5.2-codex",
+      "gpt-5.1",
+      "gpt-5.1-codex-max",
+      "gpt-5.1-codex",
+      "gpt-5.1-codex-mini",
+      "gpt-5",
+      "gpt-5-codex",
+      "gpt-5-nano",
+      "glm-5.1",
+      "glm-5",
+      "minimax-m2.7",
+      "minimax-m2.5",
+      "kimi-k2.6",
+      "kimi-k2.5",
+      "qwen3.6-plus",
+      "qwen3.5-plus",
+      "big-pickle",
+      "deepseek-v4-flash-free",
+      "qwen3.6-plus-free",
+      "minimax-m2.5-free",
+      "nemotron-3-super-free",
+    ],
+  },
+  {
+    label: "MiniMax",
+    models: [
+      "MiniMax-M2.7",
+      "MiniMax-M2.7-highspeed",
+      "MiniMax-M2.5",
+      "MiniMax-M2.5-highspeed",
+      "MiniMax-M2.1",
+      "MiniMax-M2.1-highspeed",
+      "MiniMax-M2",
+    ],
+  },
+];
+const KNOWN_MODELS = new Set(MODEL_GROUPS.flatMap((group) => group.models));
 
 function api(path, options) {
   return fetch(path, options).then(async (res) => {
@@ -170,17 +239,31 @@ function App() {
 }
 
 function SetupPanel({ form, update, canStart, startRun }) {
+  function applyProvider(provider) {
+    update("openai_base_url", provider.baseUrl);
+    update("writer_model", provider.writer);
+    update("reviewer_model", provider.reviewer);
+  }
+
   return h("section", { className: "space-y-4" },
     h("div", { className: "rounded border border-zinc-200 bg-white p-4" },
       h("h2", { className: "mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500" }, "Setup"),
-      field("OpenAI API key", "openai_api_key", "password", form, update),
+      h("div", { className: "mb-3 grid grid-cols-3 gap-2" }, PROVIDERS.map((provider) =>
+        h("button", {
+          key: provider.name,
+          type: "button",
+          className: `rounded border px-2 py-2 text-xs ${form.openai_base_url === provider.baseUrl ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-300 bg-white"}`,
+          onClick: () => applyProvider(provider),
+        }, provider.name)
+      )),
+      field("API key", "openai_api_key", "password", form, update),
       field("Base URL", "openai_base_url", "text", form, update),
       field("FAL key", "fal_key", "password", form, update),
       field("ElevenLabs key", "elevenlabs_api_key", "password", form, update),
       field("Writer model", "writer_model", "text", form, update),
-      presets((model) => update("writer_model", model)),
+      modelSelect("Writer preset", "writer_model", form, update),
       field("Reviewer model", "reviewer_model", "text", form, update),
-      presets((model) => update("reviewer_model", model))
+      modelSelect("Reviewer preset", "reviewer_model", form, update)
     ),
     h("div", { className: "rounded border border-zinc-200 bg-white p-4" },
       h("h2", { className: "mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500" }, "Pipeline"),
@@ -219,10 +302,24 @@ function toggle(label, name, form, update) {
   );
 }
 
-function presets(onPick) {
-  return h("div", { className: "mb-3 flex gap-2" }, ["gpt-4o-mini", "gpt-4o", "gpt-5-mini"].map((model) =>
-    h("button", { key: model, type: "button", className: "rounded border border-zinc-300 px-2 py-1 text-xs", onClick: () => onPick(model) }, model)
-  ));
+function modelSelect(label, name, form, update) {
+  const current = form[name] ?? "";
+  return h("label", { className: "mb-3 block text-sm" },
+    h("span", { className: "mb-1 block text-zinc-600" }, label),
+    h("select", {
+      className: "w-full rounded border border-zinc-300 bg-white px-3 py-2",
+      value: current,
+      onChange: (event) => update(name, event.target.value),
+    },
+      h("option", { value: "" }, "Custom"),
+      current && !KNOWN_MODELS.has(current) && h("option", { value: current }, current),
+      MODEL_GROUPS.map((group) =>
+        h("optgroup", { key: group.label, label: group.label }, group.models.map((model) =>
+          h("option", { key: `${group.label}:${model}`, value: model }, model)
+        ))
+      )
+    )
+  );
 }
 
 function RunView({ manifest, events, grouped, activeTab, setActiveTab, openArtifact, artifactText, artifactPath }) {

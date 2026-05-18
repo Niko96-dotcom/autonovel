@@ -89,12 +89,15 @@ async def _sleep_before_retry(attempt: int, retry_base_seconds: float) -> None:
     await asyncio.sleep(retry_base_seconds * (2 ** attempt))
 
 
-async def _stream_text(response: Any) -> AsyncIterator[str]:
-    async for chunk in response:
-        delta = chunk.choices[0].delta
-        text = getattr(delta, "content", None)
-        if text:
-            yield text
+async def _stream_text(response: Any, client: AsyncOpenAI) -> AsyncIterator[str]:
+    try:
+        async for chunk in response:
+            delta = chunk.choices[0].delta
+            text = getattr(delta, "content", None)
+            if text:
+                yield text
+    finally:
+        await client.close()
 
 
 async def _create_with_retries(
@@ -177,15 +180,19 @@ async def complete(
         payload["response_format"] = response_format
 
     client = _client(api_key=api_key, base_url=resolved_base_url)
-    response = await _create_with_retries(
-        client=client,
-        payload=payload,
-        max_retries=max_retries,
-        retry_base_seconds=retry_base_seconds,
-    )
-    if stream:
-        return _stream_text(response)
-    return _strip_reasoning_tags(response.choices[0].message.content or "")
+    try:
+        response = await _create_with_retries(
+            client=client,
+            payload=payload,
+            max_retries=max_retries,
+            retry_base_seconds=retry_base_seconds,
+        )
+        if stream:
+            return _stream_text(response, client)
+        return _strip_reasoning_tags(response.choices[0].message.content or "")
+    finally:
+        if not stream:
+            await client.close()
 
 
 def complete_sync(
