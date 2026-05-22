@@ -23,10 +23,20 @@ cp .env.example .env    # Add your API keys
 # Install dependencies
 uv sync
 
-# Generate a seed concept (or write your own in seed.txt)
-uv run python seed.py
+# Start the local web UI
+uv run autonovel ui
+```
 
-# Run the full pipeline
+Open the printed local URL, paste your OpenAI-compatible key, paste a seed,
+and start a run. Keys are passed to the child process environment for that run
+and are not written to the run manifest.
+
+![Autonovel run inspector](docs/autonovel-ui.png)
+
+CLI fallback:
+
+```bash
+uv run python seed.py
 uv run python run_pipeline.py --from-scratch
 ```
 
@@ -46,8 +56,8 @@ retry if not. Forward progress over perfection.
 Adversarial editing → apply cuts → reader panel → generate briefs →
 rewrite chapters. Plateau detection stops the loop when scores stabilize.
 
-### Phase 3b: Opus Review Loop
-Send the full manuscript to Claude Opus for dual-persona review
+### Phase 3b: Reviewer Model Loop
+Send the full manuscript to the reviewer model for dual-persona review
 (literary critic + professor of fiction). Parse actionable items.
 Fix the top issues. Repeat until the reviewer runs out of major items.
 
@@ -85,7 +95,7 @@ See [PIPELINE.md](PIPELINE.md) for the full technical specification.
 | `adversarial_edit.py` | "Cut 500 words" analysis → classified cuts |
 | `compare_chapters.py` | Head-to-head Elo tournament |
 | `reader_panel.py` | 4-persona novel-level evaluation |
-| `review.py` | Opus dual-persona review with stopping conditions |
+| `review.py` | Reviewer-model dual-persona review with stopping conditions |
 
 ### Revision
 | Tool | Purpose |
@@ -147,7 +157,9 @@ ART:
   landing/index.html     — Responsive landing page template
 
 CONFIG:
-  .env.example           — API keys (Anthropic, fal.ai, ElevenLabs)
+  .env.example           — API keys and model slots
+  web/                   — Local run inspector UI
+  autonovel/server.py    — FastAPI backend and SSE endpoints
   pyproject.toml         — Python dependencies
 ```
 
@@ -178,9 +190,9 @@ downstream). The pipeline tracks propagation debts in `state.json`.
 2. **LLM Judge** (`evaluate.py`, separate model): scores prose quality,
    voice adherence, character distinctiveness, beat coverage.
 
-### The Opus Review Loop
+### The Reviewer Model Loop
 
-After automated revision cycles, the full manuscript goes to Claude Opus
+After automated revision cycles, the full manuscript goes to the reviewer model
 with this prompt:
 
 > "Read the below novel. Review it first as a literary critic and then
@@ -199,12 +211,14 @@ The pipeline uses three external services:
 
 | Service | Key | Used for |
 |---------|-----|----------|
-| Anthropic | `ANTHROPIC_API_KEY` | Writing, evaluation, review (Sonnet + Opus) |
+| OpenAI-compatible chat API | `OPENAI_API_KEY` | Writing, evaluation, review |
+| OpenAI-compatible endpoint | `OPENAI_BASE_URL` | Optional non-OpenAI base URL |
 | fal.ai | `FAL_KEY` | Cover art and ornament generation (Nano Banana 2) |
 | ElevenLabs | `ELEVENLABS_API_KEY` | Multi-voice audiobook generation |
 
-Copy `.env.example` to `.env` and fill in your keys. Only the Anthropic
-key is required for the core pipeline. Art and audiobook are optional.
+Copy `.env.example` to `.env` for CLI use, or paste keys into the web UI for
+one run. Only `OPENAI_API_KEY` is required for the core pipeline. Art and
+audiobook are optional.
 
 ---
 
@@ -215,7 +229,7 @@ through this pipeline:
 
 - **Foundation:** World bible, 8 characters, 24-chapter outline, voice discovery
 - **Drafting:** 24 chapters, 75,698 words, sequential with evaluation
-- **Revision:** 6 automated cycles + 6 Opus review rounds
+- **Revision:** 6 automated cycles + 6 reviewer-model rounds
 - **Structural:** 24 → 19 chapters through 4 merges
 - **Art:** Linocut cover (Nano Banana 2), 19 woodcut chapter ornaments (vectorized)
 - **Audiobook:** 19 chapters parsed into 4,179 speaker-attributed segments

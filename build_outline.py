@@ -4,42 +4,31 @@ Rebuild outline.md from the actual chapters.
 Reads each chapter, calls the LLM for a structured summary,
 and assembles into an outline that reflects the novel as-written.
 """
-import os
 import sys
 import json
 import re
 from pathlib import Path
 from dotenv import load_dotenv
 
+from autonovel.llm import complete_prompt_sync
+
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env")
 
-JUDGE_MODEL = os.environ.get("AUTONOVEL_JUDGE_MODEL", "claude-sonnet-4-6")
-API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-API_BASE = os.environ.get("AUTONOVEL_API_BASE_URL", "https://api.anthropic.com")
 CHAPTERS_DIR = BASE_DIR / "chapters"
 
 def call_model(prompt, max_tokens=1500):
-    import httpx
-    headers = {
-        "x-api-key": API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
-    payload = {
-        "model": JUDGE_MODEL,
-        "max_tokens": max_tokens,
-        "temperature": 0.1,
-        "system": (
+    text = complete_prompt_sync(
+        prompt,
+        system=(
             "You produce structured outline entries for novel chapters. "
             "Be precise about what HAPPENS, what CHANGES, and what threads are planted/harvested. "
             "Output valid JSON only."
         ),
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    resp = httpx.post(f"{API_BASE}/v1/messages", headers=headers, json=payload, timeout=120)
-    resp.raise_for_status()
-    text = resp.json()["content"][0]["text"]
+        slot="reviewer",
+        max_tokens=max_tokens,
+        temperature=0.1,
+    )
     # Extract JSON from response
     text = text.strip()
     if text.startswith("```"):
@@ -53,8 +42,10 @@ def main():
     
     entries = []
     
-    for ch in range(1, 20):
-        path = CHAPTERS_DIR / f"ch_{ch:02d}.md"
+    chapter_files = sorted(CHAPTERS_DIR.glob("ch_*.md"))
+
+    for path in chapter_files:
+        ch = int(re.search(r"ch_(\d+)", path.name).group(1))
         text = path.read_text()
         wc = len(text.split())
         

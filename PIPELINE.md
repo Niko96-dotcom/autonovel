@@ -109,7 +109,7 @@ INPUT:  seed.txt (user-provided or generated via seed.py)
 OUTPUT: branch created, .env configured
 
 1. git checkout -b autonovel/<tag>
-2. Verify .env has ANTHROPIC_API_KEY
+2. Verify .env has OPENAI_API_KEY
 3. Verify seed.txt exists and is specific enough
    (world-differentiator, central tension, cost/constraint, sensory hook)
 ```
@@ -311,14 +311,14 @@ CYCLE 6: POLISH (final pass)
 ```
 
 ```
-PHASE 3b: OPUS REVIEW LOOP (deep, prose-level refinement)
+PHASE 3b: REVIEWER MODEL LOOP (deep, prose-level refinement)
 
-  After the automated cycles, switch to Opus for the final quality push.
+  After the automated cycles, switch to the reviewer model for the final quality push.
   This is the evaluation that actually catches prose problems, structural
   repetition, character thinness, and ethical gaps.
 
   Tool: review.py
-  Model: Claude Opus (the best available for literary analysis)
+  Model: REVIEWER_MODEL (choose your best available literary analysis model)
   Prompt: "Read the below novel. Review it first as a literary critic
     (like a newspaper book review) and then as a professor of fiction.
     In the later review, give specific, actionable suggestions for any
@@ -326,7 +326,7 @@ PHASE 3b: OPUS REVIEW LOOP (deep, prose-level refinement)
 
   Loop (max 4 rounds):
     1. review.py --output reviews.md
-       Sends full manuscript to Opus. Gets dual-persona review.
+       Sends full manuscript to REVIEWER_MODEL. Gets dual-persona review.
     2. review.py --parse
        Extracts actionable items, severity, type.
        Classifies items: major/moderate/minor, qualified/unqualified.

@@ -4,36 +4,34 @@ Build a condensed arc summary for full-novel evaluation.
 For each chapter: first 150 words, last 150 words, plus any dialogue.
 Gives the reader panel enough to evaluate the ARC without 72k tokens.
 """
-import os
 import re
 from pathlib import Path
 from dotenv import load_dotenv
 
+from autonovel.llm import complete_sync, writer_model
+
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env")
 
-WRITER_MODEL = os.environ.get("AUTONOVEL_WRITER_MODEL", "claude-sonnet-4-6")
-API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-API_BASE = os.environ.get("AUTONOVEL_API_BASE_URL", "https://api.anthropic.com")
 CHAPTERS_DIR = BASE_DIR / "chapters"
 
 def call_writer(prompt, max_tokens=4000):
-    import httpx
-    headers = {
-        "x-api-key": API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
-    payload = {
-        "model": WRITER_MODEL,
-        "max_tokens": max_tokens,
-        "temperature": 0.1,
-        "system": "You summarize novel chapters precisely. State what HAPPENS, what CHANGES, and what QUESTIONS are left open. No evaluation. No praise. Just events and shifts.",
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    resp = httpx.post(f"{API_BASE}/v1/messages", headers=headers, json=payload, timeout=120)
-    resp.raise_for_status()
-    return resp.json()["content"][0]["text"]
+    return complete_sync(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "You summarize novel chapters precisely. State what HAPPENS, "
+                    "what CHANGES, and what QUESTIONS are left open. No evaluation. "
+                    "No praise. Just events and shifts."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        model=writer_model(),
+        max_tokens=max_tokens,
+        temperature=0.1,
+    )
 
 def extract_key_passages(text):
     """Get opening, closing, and best dialogue from a chapter."""
@@ -51,9 +49,10 @@ def extract_key_passages(text):
 
 def main():
     summaries = []
+    chapter_files = sorted(CHAPTERS_DIR.glob("ch_*.md"))
     
-    for ch in range(1, 20):
-        path = CHAPTERS_DIR / f"ch_{ch:02d}.md"
+    for path in chapter_files:
+        ch = int(re.search(r"ch_(\d+)", path.name).group(1))
         text = path.read_text()
         wc = len(text.split())
         opening, closing, dialogue = extract_key_passages(text)
@@ -80,14 +79,14 @@ def main():
         print(f"Ch {ch}: summarized ({wc}w)")
     
     # Calculate total word count
-    total_wc = sum(len((CHAPTERS_DIR / f"ch_{c:02d}.md").read_text().split()) for c in range(1, 20))
+    total_wc = sum(len(path.read_text().split()) for path in chapter_files)
     
     # Assemble
     full = f"""# THE SECOND SON OF THE HOUSE OF BELLS
 ## Full-Arc Summary for Reader Panel
 
 This document contains chapter summaries, opening/closing passages,
-and key dialogue for all 23 chapters. Total novel: {total_wc:,} words.
+and key dialogue for all {len(chapter_files)} chapters. Total novel: {total_wc:,} words.
 
 PREMISE: In Cantamura, a city where law is sung into binding through
 specific musical intervals, 14-year-old Cass Bellwright can hear when
