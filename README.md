@@ -15,13 +15,42 @@ See the `autonovel/bells` branch.
 
 ## Quick Start
 
+### Easiest: AutoNovel Studio for macOS
+
+The native SwiftUI app guides you through the only required input, makes every planning
+document and drafted chapter editable, and shows phase, scores, word count, evaluations,
+local-process output, and newly written chapters in real time.
+The searchable chapter navigator lists the entire manuscript, with word counts, excerpts,
+and previous/next navigation for focused editing.
+
+```bash
+./script/build_and_run.sh
+```
+
+In the app:
+
+1. Open **New Book Setup** and fill the five essential fields.
+2. Choose **Save & Continue to Start**.
+3. Open **Model Provider** in the sidebar or macOS Settings and configure the endpoint.
+4. Choose **Save & Check Connection**, then start or resume the novel from **Overview**.
+
+The app reads and writes this repository directly. Foundation proposes the voice, world,
+characters, secrets, outline, and canon from your setup; all of them remain editable in the
+sidebar. The pipeline uses the configured text model for writing, evaluation, summaries,
+reader panels, and revision.
+
+### Terminal
+
 ```bash
 # Clone and setup
 git clone <repo-url> && cd autonovel
-cp .env.example .env    # Add your API keys
+cp .env.example .env    # Select Anthropic or an OpenAI-compatible backend
 
 # Install dependencies
 uv sync
+
+# Verify the configured text model
+uv run python check_llm.py
 
 # Generate a seed concept (or write your own in seed.txt)
 uv run python seed.py
@@ -46,10 +75,12 @@ retry if not. Forward progress over perfection.
 Adversarial editing → apply cuts → reader panel → generate briefs →
 rewrite chapters. Plateau detection stops the loop when scores stabilize.
 
-### Phase 3b: Opus Review Loop
-Send the full manuscript to Claude Opus for dual-persona review
+### Phase 3b: Whole-book Review Loop
+Send the manuscript to the configured review model for dual-persona review
 (literary critic + professor of fiction). Parse actionable items.
 Fix the top issues. Repeat until the reviewer runs out of major items.
+Backends with smaller context windows automatically close-read chapter groups
+and synthesize the reports instead of truncating the manuscript.
 
 ### Phase 4: Export
 Rebuild docs, typeset in LaTeX, generate art, produce audiobook scripts,
@@ -65,10 +96,12 @@ See [PIPELINE.md](PIPELINE.md) for the full technical specification.
 | Tool | Purpose |
 |------|---------|
 | `seed.py` | Generate seed concepts |
+| `gen_voice.py` | Story Seed → book-specific voice profile |
 | `gen_world.py` | Seed → world bible |
 | `gen_characters.py` | Seed + world → character registry |
-| `gen_outline.py` | Outline with beats and foreshadowing |
-| `gen_outline_part2.py` | Foreshadowing ledger |
+| `gen_mystery.py` | World + characters → author-only secrets and reveal plan |
+| `gen_outline.py` | Complete outline with beats and foreshadowing ledger |
+| `gen_outline_part2.py` | Compatibility alias for the complete outline generator |
 | `gen_canon.py` | Cross-reference hard facts |
 | `voice_fingerprint.py` | Voice analysis and discovery |
 
@@ -85,7 +118,7 @@ See [PIPELINE.md](PIPELINE.md) for the full technical specification.
 | `adversarial_edit.py` | "Cut 500 words" analysis → classified cuts |
 | `compare_chapters.py` | Head-to-head Elo tournament |
 | `reader_panel.py` | 4-persona novel-level evaluation |
-| `review.py` | Opus dual-persona review with stopping conditions |
+| `review.py` | Whole-book dual-persona review with stopping conditions |
 
 ### Revision
 | Tool | Purpose |
@@ -129,6 +162,8 @@ FRAMEWORK (reusable, on master):
   WORKFLOW.md            — Step-by-step human guide
 
 TEMPLATES (filled per-novel on a branch):
+  book.json              — Structured brief saved by AutoNovel Studio
+  seed.txt               — Human-readable Story Seed generated from the brief
   voice.md               — Part 1: guardrails. Part 2: discovered per novel
   world.md               — World bible template
   characters.md          — Character registry template
@@ -147,7 +182,7 @@ ART:
   landing/index.html     — Responsive landing page template
 
 CONFIG:
-  .env.example           — API keys (Anthropic, fal.ai, ElevenLabs)
+  .env.example           — text backend plus optional fal.ai/ElevenLabs keys
   pyproject.toml         — Python dependencies
 ```
 
@@ -178,9 +213,9 @@ downstream). The pipeline tracks propagation debts in `state.json`.
 2. **LLM Judge** (`evaluate.py`, separate model): scores prose quality,
    voice adherence, character distinctiveness, beat coverage.
 
-### The Opus Review Loop
+### The Whole-book Review Loop
 
-After automated revision cycles, the full manuscript goes to Claude Opus
+After automated revision cycles, the manuscript goes to the configured review model
 with this prompt:
 
 > "Read the below novel. Review it first as a literary critic and then
@@ -193,18 +228,48 @@ loop continues until the reviewer's items are mostly qualified hedges rather tha
 
 ---
 
-## API Keys
+## Model Backends and API Keys
 
-The pipeline uses three external services:
+All text-model work uses one shared client. It supports Anthropic and OpenAI-compatible
+servers such as llama.cpp, Ollama, LM Studio, and vLLM. Configure the writer, judge,
+and reviewer independently; they may all point to the same local model.
+
+For a local llama.cpp server:
+
+```dotenv
+AUTONOVEL_LLM_PROVIDER=openai
+AUTONOVEL_API_BASE_URL=http://127.0.0.1:8081
+AUTONOVEL_API_KEY_FILE=/absolute/path/to/llama-api-key
+AUTONOVEL_WRITER_MODEL=gemstrike-31b
+AUTONOVEL_JUDGE_MODEL=gemstrike-31b
+AUTONOVEL_REVIEW_MODEL=gemstrike-31b
+AUTONOVEL_CONTEXT_SIZE=32768
+```
+
+The pipeline can also use these services:
 
 | Service | Key | Used for |
 |---------|-----|----------|
-| Anthropic | `ANTHROPIC_API_KEY` | Writing, evaluation, review (Sonnet + Opus) |
+| Text model | `AUTONOVEL_API_KEY` or `AUTONOVEL_API_KEY_FILE` | Writing, evaluation, review, summaries, text directions |
 | fal.ai | `FAL_KEY` | Cover art and ornament generation (Nano Banana 2) |
 | ElevenLabs | `ELEVENLABS_API_KEY` | Multi-voice audiobook generation |
 
-Copy `.env.example` to `.env` and fill in your keys. Only the Anthropic
-key is required for the core pipeline. Art and audiobook are optional.
+Copy `.env.example` to `.env` and select a text backend. Art and audiobook
+rendering are optional and still require fal.ai and ElevenLabs respectively;
+their text planning/parsing steps use the configured text model.
+
+### Model providers in AutoNovel Studio
+
+The native settings window can configure Anthropic or any OpenAI-compatible API.
+Presets are included for OpenAI, Anthropic, Ollama, LM Studio, and a generic local
+server; custom endpoints remain fully editable. Writer, judge, and whole-book reviewer
+models can be assigned independently, along with the backend context window.
+
+Credentials can come from the existing environment, a key file, or a key entered in
+the app. App-managed keys are stored in `.autonovel/secrets/text-model-api-key` with
+0600 permissions and the secrets directory is ignored by Git. No-auth mode is limited
+to loopback OpenAI-compatible servers. Saving settings updates only AutoNovel's model
+variables and preserves unrelated `.env` entries such as optional art or audiobook keys.
 
 ---
 

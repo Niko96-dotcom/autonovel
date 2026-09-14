@@ -4,9 +4,20 @@ import subprocess
 import sys
 import re
 import json
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 
-def run(cmd, timeout=600):
-    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+BASE_DIR = Path(__file__).parent
+load_dotenv(BASE_DIR / ".env", override=True)
+MODEL_TOOL_TIMEOUT = int(os.environ.get("AUTONOVEL_TOOL_TIMEOUT", "1800"))
+
+
+def run(cmd, timeout=MODEL_TOOL_TIMEOUT):
+    r = subprocess.run(
+        cmd, shell=True, capture_output=True, text=True, timeout=timeout,
+        cwd=BASE_DIR,
+    )
     return r.stdout + r.stderr, r.returncode
 
 def slop_check(ch):
@@ -23,7 +34,7 @@ def pattern_check(ch):
     return words, didnot, thought
 
 def spot_eval(ch):
-    out, rc = run(f'.venv/bin/python3 evaluate.py --chapter={ch}', timeout=300)
+    out, rc = run(f'.venv/bin/python3 evaluate.py --chapter={ch}')
     m_overall = re.search(r'overall_score: ([\d.]+)', out)
     m_raw = re.search(r'raw_judge_score: (\d+)', out)
     if m_overall and m_raw:
@@ -72,7 +83,7 @@ for ch in chapters:
     results.append((ch, words, slop['slop_penalty'], score))
     
     # Git commit
-    run(f"cd /home/jeffq/autonovel && git add chapters/ch_{ch:02d}.md state.json")
+    run(f"git add chapters/ch_{ch:02d}.md state.json")
     
     # Update state.json
     with open("state.json") as f:

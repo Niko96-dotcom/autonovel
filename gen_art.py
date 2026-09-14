@@ -31,6 +31,7 @@ import argparse
 import subprocess
 from pathlib import Path
 from dotenv import load_dotenv
+from llm_client import call_llm
 
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env", override=True)
@@ -46,8 +47,6 @@ STYLE_FILE = ART_DIR / "visual_style.json"
 PICKS_FILE = ART_DIR / "picks.json"
 
 WRITER_MODEL = os.environ.get("AUTONOVEL_WRITER_MODEL", "claude-sonnet-4-6")
-ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-ANTHROPIC_BASE = os.environ.get("AUTONOVEL_API_BASE_URL", "https://api.anthropic.com")
 
 
 # ============================================================
@@ -112,25 +111,14 @@ def download_image(url, dest_path):
     return len(resp.content)
 
 
-def call_claude(prompt, max_tokens=1500):
-    import httpx
-    resp = httpx.post(
-        f"{ANTHROPIC_BASE}/v1/messages",
-        headers={
-            "x-api-key": ANTHROPIC_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json={
-            "model": WRITER_MODEL,
-            "max_tokens": max_tokens,
-            "temperature": 0.3,
-            "messages": [{"role": "user", "content": prompt}],
-        },
+def call_model(prompt, max_tokens=1500):
+    return call_llm(
+        prompt,
+        model=WRITER_MODEL,
+        max_tokens=max_tokens,
+        temperature=0.3,
         timeout=120,
     )
-    resp.raise_for_status()
-    return resp.json()["content"][0]["text"]
 
 
 def load_style():
@@ -197,7 +185,7 @@ Define a VISUAL STYLE for all art in this novel. Output valid JSON:
 JSON only."""
 
     print("Deriving visual style from world + voice...")
-    result = call_claude(prompt)
+    result = call_model(prompt)
     text = result.strip()
     if text.startswith("```"):
         text = re.sub(r'^```\w*\n?', '', text)

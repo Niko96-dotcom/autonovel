@@ -1,0 +1,182 @@
+import XCTest
+@testable import AutoNovelStudio
+
+final class AutoNovelStudioTests: XCTestCase {
+    func testLatestModelStatusTracksNewRequestAndIgnoresIncompleteLines() {
+        let output = "[LLM progress] Response complete: 100 words.\nChecking chapter\n[LLM request] Reading context...\n[LLM progress] 2 wor"
+        XCTAssertEqual(PipelineRunner.latestModelStatus(in: output), "Reading context...")
+        XCTAssertEqual(PipelineRunner.latestModelStatus(in: output + "ds received.\n"), "2 words received.")
+        XCTAssertNil(PipelineRunner.latestModelStatus(in: "Starting pipeline\n"))
+    }
+
+    func testBookBriefCountsOnlyEssentialFields() {
+        var brief = BookBrief()
+        XCTAssertEqual(brief.requiredCompleted, 0)
+
+        brief.title = "The Glass Cartographer"
+        brief.premise = "A mapmaker discovers that erased roads still remember their travelers."
+        brief.protagonist = "Mara, an exacting apprentice who cannot get lost."
+        brief.centralConflict = "The royal surveyor is deleting rebellious towns from reality."
+        brief.worldHook = "Maps determine which places can physically exist."
+
+        XCTAssertEqual(brief.requiredCompleted, 5)
+    }
+
+    func testSeedTextCarriesBookChoices() {
+        var brief = BookBrief()
+        brief.title = "The Glass Cartographer"
+        brief.targetWords = 70_000
+        brief.targetChapters = 21
+        brief.premise = "A living-map mystery."
+
+        XCTAssertTrue(brief.seedText.contains("# The Glass Cartographer"))
+        XCTAssertTrue(brief.seedText.contains("70000 words"))
+        XCTAssertTrue(brief.seedText.contains("21 chapters"))
+        XCTAssertTrue(brief.seedText.contains("A living-map mystery."))
+        XCTAssertTrue(brief.seedText.contains("Not specified — let the pipeline propose options."))
+    }
+
+    func testPipelineStateDecodesPartialState() throws {
+        let json = #"{"phase":"drafting","chapters_drafted":3,"chapters_total":12}"#.data(using: .utf8)!
+        let state = try JSONDecoder().decode(PipelineState.self, from: json)
+
+        XCTAssertEqual(state.phase, "drafting")
+        XCTAssertEqual(state.chaptersDrafted, 3)
+        XCTAssertEqual(state.chaptersTotal, 12)
+        XCTAssertEqual(state.foundationScore, 0)
+        XCTAssertNil(state.novelScore)
+        XCTAssertTrue(state.debts.isEmpty)
+        XCTAssertEqual(state.status, "")
+    }
+
+    func testPipelineFailureDetailsDecode() throws {
+        let json = #"{"phase":"drafting","status":"failed","novel_score":null,"last_error":{"phase":"drafting","step":"chapter_7","message":"Compute error","occurred_at":"2026-09-03T18:39:40","log_path":"/tmp/failure.log"}}"#.data(using: .utf8)!
+        let state = try JSONDecoder().decode(PipelineState.self, from: json)
+
+        XCTAssertEqual(state.status, "failed")
+        XCTAssertEqual(state.lastError?.step, "chapter_7")
+        XCTAssertEqual(state.lastError?.message, "Compute error")
+        XCTAssertNil(state.novelScore)
+    }
+
+    func testFailedEvaluationHistoryIsNotShownAsSuccess() {
+        let failed = ActivityRecord(
+            index: 0,
+            columns: ["abc", "revision-cycle-1", "-1.0", "1000", "cycle", "No score"]
+        )
+        let discarded = ActivityRecord(
+            index: 1,
+            columns: ["discarded", "ch02", "5.5", "1000", "discard", "Retry"]
+        )
+
+        XCTAssertTrue(failed.isFailure)
+        XCTAssertEqual(failed.resultSymbol, "exclamationmark.triangle.fill")
+        XCTAssertTrue(discarded.isDiscarded)
+        XCTAssertEqual(discarded.resultSymbol, "arrow.counterclockwise.circle")
+    }
+
+    func testChapterWithoutHeadingUsesStableNumberInsteadOfProseAsTitle() {
+        let url = URL(fileURLWithPath: "/tmp/ch_01.md")
+        let chapter = ChapterInfo.parse(
+            number: 1,
+            url: url,
+            text: "The rain started before midnight. It kept Mara awake.\n\nA second paragraph."
+        )
+
+        XCTAssertEqual(chapter.title, "Chapter 01")
+        XCTAssertEqual(chapter.excerpt, "The rain started before midnight. It kept Mara awake.")
+        XCTAssertEqual(chapter.words, 12)
+    }
+
+    func testChapterHeadingBecomesTitleAndExcerptRemainsSeparate() {
+        let url = URL(fileURLWithPath: "/tmp/ch_12.md")
+        let chapter = ChapterInfo.parse(
+            number: 12,
+            url: url,
+            text: "# The Vanishing Road\n\nMara folded the impossible map."
+        )
+
+        XCTAssertEqual(chapter.title, "The Vanishing Road")
+        XCTAssertEqual(chapter.excerpt, "Mara folded the impossible map.")
+        XCTAssertEqual(chapter.numberLabel, "12")
+    }
+
+    func testProviderPresetInferenceSupportsLocalAndCustomEndpoints() {
+        XCTAssertEqual(
+            ProviderPreset.infer(apiProtocol: .openAICompatible, baseURL: "http://127.0.0.1:8081"),
+            .local
+        )
+        XCTAssertEqual(
+            ProviderPreset.infer(apiProtocol: .openAICompatible, baseURL: "https://models.example.org"),
+            .custom
+        )
+        XCTAssertEqual(
+            ProviderPreset.infer(apiProtocol: .anthropic, baseURL: "https://gateway.example.org"),
+            .anthropic
+        )
+    }
+
+    func testProviderValidationLimitsNoAuthenticationToLocalhost() throws {
+        var configuration = ProviderConfiguration()
+        configuration.baseURL = "http://127.0.0.1:11434"
+        configuration.writerModel = "writer"
+        configuration.judgeModel = "judge"
+        configuration.reviewModel = "reviewer"
+        configuration.credentialMode = .none
+
+        XCTAssertNoThrow(try configuration.validated())
+
+        configuration.baseURL = "https://models.example.org/v1"
+        XCTAssertThrowsError(try configuration.validated())
+    }
+
+    func testEnvironmentUpdatePreservesUnrelatedConfiguration() {
+        let source = "# Keep this comment\nFAL_KEY=existing\nAUTONOVEL_LLM_PROVIDER=anthropic\n"
+        let updated = EnvironmentFileStore.updating(
+            source,
+            with: [
+                "AUTONOVEL_LLM_PROVIDER": "openai",
+                "AUTONOVEL_API_BASE_URL": "https://models.example.org/v1",
+            ]
+        )
+
+        XCTAssertTrue(updated.contains("# Keep this comment"))
+        XCTAssertTrue(updated.contains("FAL_KEY=existing"))
+        XCTAssertTrue(updated.contains("AUTONOVEL_LLM_PROVIDER=openai"))
+        XCTAssertTrue(updated.contains("AUTONOVEL_API_BASE_URL=https://models.example.org/v1"))
+    }
+
+    func testManagedProviderCredentialIsPrivateAndConfigurationRemainsReadable() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-provider-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "FAL_KEY=preserve-me\n".write(
+            to: root.appendingPathComponent(".env"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        var configuration = ProviderConfiguration()
+        configuration.baseURL = "http://127.0.0.1:8081"
+        configuration.writerModel = "writer-model"
+        configuration.judgeModel = "judge-model"
+        configuration.reviewModel = "review-model"
+        configuration.credentialMode = .managedKey
+        configuration.pendingAPIKey = "private-test-key"
+
+        let environmentStore = EnvironmentFileStore(projectURL: root)
+        let saved = try environmentStore.save(configuration)
+        let values = EnvironmentFileStore.values(
+            in: try String(contentsOf: root.appendingPathComponent(".env"), encoding: .utf8)
+        )
+        let keyURL = root.appendingPathComponent(EnvironmentFileStore.managedKeyPath)
+        let attributes = try FileManager.default.attributesOfItem(atPath: keyURL.path)
+
+        XCTAssertTrue(saved.hasManagedAPIKey)
+        XCTAssertEqual(values["FAL_KEY"], "preserve-me")
+        XCTAssertEqual(values["AUTONOVEL_API_KEY_FILE"], EnvironmentFileStore.managedKeyPath)
+        XCTAssertEqual(try String(contentsOf: keyURL, encoding: .utf8), "private-test-key\n")
+        XCTAssertEqual(attributes[.posixPermissions] as? Int, 0o600)
+    }
+}

@@ -23,12 +23,23 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from dotenv import load_dotenv
+from book_config import target_chapters as configured_target_chapters
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 BASE_DIR = Path(__file__).parent
+load_dotenv(BASE_DIR / ".env", override=True)
+
+_LOCAL_BACKEND = os.environ.get("AUTONOVEL_LLM_PROVIDER", "anthropic") == "openai"
+MODEL_TOOL_TIMEOUT = int(os.environ.get(
+    "AUTONOVEL_TOOL_TIMEOUT", "1800" if _LOCAL_BACKEND else "600"
+))
+MODEL_BATCH_TIMEOUT = int(os.environ.get(
+    "AUTONOVEL_BATCH_TIMEOUT", "21600" if _LOCAL_BACKEND else "1800"
+))
 STATE_FILE = BASE_DIR / "state.json"
 RESULTS_FILE = BASE_DIR / "results.tsv"
 CHAPTERS_DIR = BASE_DIR / "chapters"
@@ -67,7 +78,7 @@ def default_state() -> dict:
         "foundation_score": 0.0,
         "lore_score": 0.0,
         "chapters_drafted": 0,
-        "chapters_total": 0,
+        "chapters_total": configured_target_chapters(),
         "novel_score": 0.0,
         "revision_cycle": 0,
         "debts": [],
@@ -98,15 +109,15 @@ def log_result(commit: str, phase: str, score, word_count: int,
 
 def banner(text: str, char: str = "=", width: int = 60):
     """Print a visible phase/step banner."""
-    print(f"\n{char * width}")
-    print(f"  {text}")
-    print(f"{char * width}")
+    print(f"\n{char * width}", flush=True)
+    print(f"  {text}", flush=True)
+    print(f"{char * width}", flush=True)
 
 
 def step(text: str):
     """Print a step indicator."""
     ts = datetime.now().strftime("%H:%M:%S")
-    print(f"  [{ts}] {text}")
+    print(f"  [{ts}] {text}", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +155,14 @@ def run_tool(cmd: str, timeout: int = 600, check: bool = False) -> subprocess.Co
 def uv_run(script: str, timeout: int = 600) -> subprocess.CompletedProcess:
     """Shorthand for 'uv run python <script>' from project root."""
     return run_tool(f"uv run python {script}", timeout=timeout)
+
+
+def run_generation(script: str, timeout: int) -> None:
+    """Run a generator that writes its named project document."""
+    result = uv_run(script, timeout=timeout)
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout or "unknown error").strip()
+        raise RuntimeError(f"{script} failed: {details[:1000]}")
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +247,7 @@ def get_total_chapters(state: dict) -> int:
         matches = re.findall(r'###\s*Ch(?:apter)?\s*(\d+)', text)
         if matches:
             return max(int(m) for m in matches)
-    return 24  # sensible default
+    return configured_target_chapters()
 
 
 # ---------------------------------------------------------------------------
@@ -249,28 +268,26 @@ def run_foundation(state: dict) -> dict:
         banner(f"Foundation Iteration {i}", "-")
         state["iteration"] = i
 
-        # 1. Generate planning documents
-        step("Generating world bible...")
-        uv_run("gen_world.py", timeout=300)
-
-        step("Generating characters...")
-        uv_run("gen_characters.py", timeout=300)
-
-        step("Generating outline (part 1)...")
-        uv_run("gen_outline.py", timeout=300)
-
-        step("Generating outline (part 2 — foreshadowing)...")
-        uv_run("gen_outline_part2.py", timeout=300)
-
-        step("Generating canon...")
-        uv_run("gen_canon.py", timeout=300)
-
-        step("Running voice fingerprint...")
-        uv_run("voice_fingerprint.py", timeout=300)
+        # 1. Generate planning documents in dependency order.
+        generators = [
+            ("voice", "Generating the book-specific voice…", "gen_voice.py"),
+            ("world", "Generating the world and story systems…", "gen_world.py"),
+            ("characters", "Generating the character registry…", "gen_characters.py"),
+            ("mystery", "Designing author-only secrets and reveals…", "gen_mystery.py"),
+            ("outline", "Generating the complete chapter outline…", "gen_outline.py"),
+            ("canon", "Extracting continuity canon…", "gen_canon.py"),
+        ]
+        for focus, message, script in generators:
+            state["current_focus"] = focus
+            save_state(state)
+            step(message)
+            run_generation(script, timeout=MODEL_TOOL_TIMEOUT)
 
         # 2. Evaluate
+        state["current_focus"] = "foundation_evaluation"
+        save_state(state)
         step("Evaluating foundation...")
-        eval_result = uv_run("evaluate.py --phase=foundation", timeout=300)
+        eval_result = uv_run("evaluate.py --phase=foundation", timeout=MODEL_TOOL_TIMEOUT)
         score = parse_score(eval_result.stdout, "overall_score")
         lore = parse_lore_score(eval_result.stdout)
 
@@ -328,13 +345,15 @@ def run_drafting(state: dict) -> dict:
 
     for ch in range(start_chapter, total + 1):
         banner(f"Drafting Chapter {ch}/{total}", "-")
+        state["current_focus"] = f"chapter_{ch}"
+        save_state(state)
         drafted = False
 
         for attempt in range(1, MAX_CHAPTER_ATTEMPTS + 1):
             step(f"Attempt {attempt}/{MAX_CHAPTER_ATTEMPTS}")
 
             # Draft
-            draft_result = uv_run(f"draft_chapter.py {ch}", timeout=600)
+            draft_result = uv_run(f"draft_chapter.py {ch}", timeout=MODEL_TOOL_TIMEOUT)
             if draft_result.returncode != 0:
                 step(f"Draft failed (exit {draft_result.returncode}), retrying...")
                 continue
@@ -349,7 +368,7 @@ def run_drafting(state: dict) -> dict:
             step(f"Drafted {word_count} words")
 
             # Evaluate
-            eval_result = uv_run(f"evaluate.py --chapter={ch}", timeout=300)
+            eval_result = uv_run(f"evaluate.py --chapter={ch}", timeout=MODEL_TOOL_TIMEOUT)
             score = parse_score(eval_result.stdout, "overall_score")
             step(f"Chapter {ch} score: {score}")
 
@@ -482,7 +501,7 @@ def run_revision(state: dict, max_cycles: int = MAX_REVISION_CYCLES) -> dict:
 
         # -- Step 1: Adversarial editing pass --
         step("Running adversarial editing on all chapters...")
-        uv_run("adversarial_edit.py all", timeout=900)
+        uv_run("adversarial_edit.py all", timeout=MODEL_BATCH_TIMEOUT)
 
         # -- Step 2: Apply mechanical cuts (only if apply_cuts.py exists) --
         apply_cuts = BASE_DIR / "apply_cuts.py"
@@ -495,7 +514,7 @@ def run_revision(state: dict, max_cycles: int = MAX_REVISION_CYCLES) -> dict:
 
         # -- Step 3: Reader panel --
         step("Running reader panel evaluation...")
-        uv_run("reader_panel.py", timeout=600)
+        uv_run("reader_panel.py", timeout=MODEL_BATCH_TIMEOUT)
 
         # -- Step 4: Parse panel consensus --
         panel_path = EDIT_LOGS_DIR / "reader_panel.json"
@@ -516,7 +535,7 @@ def run_revision(state: dict, max_cycles: int = MAX_REVISION_CYCLES) -> dict:
             banner(f"  Revising Ch {ch_num} ({question}) [{idx+1}/{len(consensus_items)}]", ".")
 
             # Snapshot the current chapter score for comparison
-            pre_eval = uv_run(f"evaluate.py --chapter={ch_num}", timeout=300)
+            pre_eval = uv_run(f"evaluate.py --chapter={ch_num}", timeout=MODEL_TOOL_TIMEOUT)
             pre_score = parse_score(pre_eval.stdout, "overall_score")
 
             # Generate revision brief
@@ -549,10 +568,10 @@ def run_revision(state: dict, max_cycles: int = MAX_REVISION_CYCLES) -> dict:
 
             # Run revision
             step(f"Revising Ch {ch_num} with brief {brief_file.name}...")
-            uv_run(f"gen_revision.py {ch_num} {brief_file}", timeout=600)
+            uv_run(f"gen_revision.py {ch_num} {brief_file}", timeout=MODEL_TOOL_TIMEOUT)
 
             # Evaluate revised chapter
-            post_eval = uv_run(f"evaluate.py --chapter={ch_num}", timeout=300)
+            post_eval = uv_run(f"evaluate.py --chapter={ch_num}", timeout=MODEL_TOOL_TIMEOUT)
             post_score = parse_score(post_eval.stdout, "overall_score")
 
             ch_file = CHAPTERS_DIR / f"ch_{ch_num:02d}.md"
@@ -576,7 +595,7 @@ def run_revision(state: dict, max_cycles: int = MAX_REVISION_CYCLES) -> dict:
 
         # -- Step 6: Full novel evaluation --
         step("Running full novel evaluation...")
-        full_eval = uv_run("evaluate.py --full", timeout=600)
+        full_eval = uv_run("evaluate.py --full", timeout=MODEL_TOOL_TIMEOUT)
         novel_score = parse_score(full_eval.stdout, "novel_score")
 
         if novel_score < 0:
@@ -606,20 +625,20 @@ def run_revision(state: dict, max_cycles: int = MAX_REVISION_CYCLES) -> dict:
         prev_score = novel_score
 
     # =========================================================
-    # PHASE 3b: OPUS REVIEW LOOP (deep, prose-level refinement)
+    # PHASE 3b: REVIEW LOOP (deep, prose-level refinement)
     # =========================================================
     review_py = BASE_DIR / "review.py"
     if review_py.exists():
-        banner("PHASE 3b: OPUS REVIEW LOOP", "=")
+        banner("PHASE 3b: WHOLE-BOOK REVIEW LOOP", "=")
         
         max_review_rounds = 4
         for rnd in range(1, max_review_rounds + 1):
-            banner(f"Opus Review Round {rnd}/{max_review_rounds}", "-")
+            banner(f"Review Round {rnd}/{max_review_rounds}", "-")
             
             # Step 1: Generate the review
-            step("Sending manuscript to Opus for review...")
+            step("Sending manuscript to the configured review model...")
             review_result = uv_run(
-                f"review.py --output reviews.md", timeout=900)
+                f"review.py --output reviews.md", timeout=MODEL_BATCH_TIMEOUT)
             
             # Step 2: Parse the review
             step("Parsing review...")
@@ -667,9 +686,9 @@ def run_revision(state: dict, max_cycles: int = MAX_REVISION_CYCLES) -> dict:
                     if ch_match:
                         ch_num = int(ch_match.group(1))
                         step(f"Revising Ch {ch_num} from review brief...")
-                        uv_run(f"gen_revision.py {ch_num} {brief}", timeout=600)
+                        uv_run(f"gen_revision.py {ch_num} {brief}", timeout=MODEL_TOOL_TIMEOUT)
                         git_add_commit(
-                            f"review round {rnd}: revise ch{ch_num:02d} from Opus feedback")
+                            f"review round {rnd}: revise ch{ch_num:02d} from model feedback")
             
             # Step 5: Mechanical fixes from review
             # Run slop pass on any mentioned patterns
@@ -683,7 +702,7 @@ def run_revision(state: dict, max_cycles: int = MAX_REVISION_CYCLES) -> dict:
             
             step(f"Review round {rnd} complete.")
         
-        banner("OPUS REVIEW LOOP COMPLETE")
+        banner("WHOLE-BOOK REVIEW LOOP COMPLETE")
     
     state["phase"] = "export"
     state["current_focus"] = "export"
@@ -708,13 +727,13 @@ def run_export(state: dict) -> dict:
     build_outline = BASE_DIR / "build_outline.py"
     if build_outline.exists():
         step("Rebuilding outline from chapters...")
-        uv_run("build_outline.py", timeout=300)
+        uv_run("build_outline.py", timeout=MODEL_BATCH_TIMEOUT)
 
     # 2. Build arc summary
     build_arc = BASE_DIR / "build_arc_summary.py"
     if build_arc.exists():
         step("Building arc summary...")
-        uv_run("build_arc_summary.py", timeout=300)
+        uv_run("build_arc_summary.py", timeout=MODEL_BATCH_TIMEOUT)
 
     # 3. Concatenate chapters into manuscript.md
     step("Building manuscript.md...")

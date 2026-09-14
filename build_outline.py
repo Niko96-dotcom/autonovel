@@ -10,36 +10,28 @@ import json
 import re
 from pathlib import Path
 from dotenv import load_dotenv
+from book_config import chapter_numbers, load_book
+from llm_client import call_llm
 
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env")
 
 JUDGE_MODEL = os.environ.get("AUTONOVEL_JUDGE_MODEL", "claude-sonnet-4-6")
-API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-API_BASE = os.environ.get("AUTONOVEL_API_BASE_URL", "https://api.anthropic.com")
 CHAPTERS_DIR = BASE_DIR / "chapters"
 
 def call_model(prompt, max_tokens=1500):
-    import httpx
-    headers = {
-        "x-api-key": API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
-    payload = {
-        "model": JUDGE_MODEL,
-        "max_tokens": max_tokens,
-        "temperature": 0.1,
-        "system": (
+    text = call_llm(
+        prompt,
+        model=JUDGE_MODEL,
+        max_tokens=max_tokens,
+        temperature=0.1,
+        system=(
             "You produce structured outline entries for novel chapters. "
             "Be precise about what HAPPENS, what CHANGES, and what threads are planted/harvested. "
             "Output valid JSON only."
         ),
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    resp = httpx.post(f"{API_BASE}/v1/messages", headers=headers, json=payload, timeout=120)
-    resp.raise_for_status()
-    text = resp.json()["content"][0]["text"]
+        timeout=120,
+    )
     # Extract JSON from response
     text = text.strip()
     if text.startswith("```"):
@@ -53,7 +45,11 @@ def main():
     
     entries = []
     
-    for ch in range(1, 20):
+    chapters = chapter_numbers()
+    if not chapters:
+        raise SystemExit("No chapter files found.")
+
+    for ch in chapters:
         path = CHAPTERS_DIR / f"ch_{ch:02d}.md"
         text = path.read_text()
         wc = len(text.split())
@@ -86,15 +82,13 @@ JSON only, no other text."""
         entries.append(data)
         print(f"  {ch:2d}. {title_line} ({wc}w)")
     
-    # Load existing outline header info
-    old_outline = (BASE_DIR / "outline.md").read_text()
-    
     # Build new outline
+    book = load_book()
     lines = []
-    lines.append("# THE SECOND SON OF THE HOUSE OF BELLS")
+    lines.append(f"# {book['title']}")
     lines.append("## Chapter Outline (reflects actual novel as-written)")
     lines.append("")
-    lines.append(f"**23 chapters, {sum(e['words'] for e in entries):,} words**")
+    lines.append(f"**{len(entries)} chapters, {sum(e['words'] for e in entries):,} words**")
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -158,7 +152,7 @@ JSON only, no other text."""
     lines.append("")
     lines.append("---")
     lines.append("")
-    lines.append("*Outline rebuilt from actual chapters, Cycle 5.*")
+    lines.append("*Outline rebuilt from the current chapter files.*")
     
     out = '\n'.join(lines)
     (BASE_DIR / "outline.md").write_text(out)

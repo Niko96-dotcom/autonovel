@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Deep manuscript review via Opus.
+Deep manuscript review via the configured review model.
 
-Sends the full novel to Claude Opus for dual-persona review:
+Sends the novel to the selected backend for dual-persona review:
   1. Literary critic (newspaper book review style)
   2. Professor of fiction (specific, actionable craft suggestions)
 
@@ -19,14 +19,16 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
+from llm_client import (
+    call_llm,
+    configuration_error,
+    prompt_fits_context,
+)
 
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env", override=True)
 
-# Use Opus for reviews — it's the best at literary analysis
 REVIEW_MODEL = os.environ.get("AUTONOVEL_REVIEW_MODEL", "claude-opus-4-6")
-API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-API_BASE = os.environ.get("AUTONOVEL_API_BASE_URL", "https://api.anthropic.com")
 
 CHAPTERS_DIR = BASE_DIR / "chapters"
 LOGS_DIR = BASE_DIR / "edit_logs"
@@ -35,29 +37,116 @@ REVIEW_PROMPT = """Read the below novel, "{title}". Review it first as a literar
 
 {manuscript}"""
 
+REVIEW_SYSTEM = (
+    "You are a rigorous literary critic and professor of fiction. Read closely, "
+    "distinguish evidence from inference, quote only text actually supplied, and make "
+    "specific editorial recommendations."
+)
 
-def call_opus(prompt, max_tokens=8000):
-    """Call Opus with the full manuscript."""
-    import httpx
-    headers = {
-        "x-api-key": API_KEY,
-        "anthropic-version": "2023-06-01",
-        "anthropic-beta": "context-1m-2025-08-07",
-        "content-type": "application/json",
-    }
-    payload = {
-        "model": REVIEW_MODEL,
-        "max_tokens": max_tokens,
-        "temperature": 0.3,
-        "messages": [{"role": "user", "content": prompt}],
-    }
+SECTION_REVIEW_PROMPT = """You are reviewing one contiguous section of the novel "{title}".
+This is section {section_number} of {section_count}, covering {chapter_names}.
+
+Read it closely and produce evidence for a later whole-book review. Address:
+- prose and voice strengths or failures, with short exact quotations
+- character movement and inconsistencies
+- pacing, repetition, missing transitions, and structural problems
+- planted/payoff threads visible in this section
+- the three most important actionable revisions
+
+Do not pretend you have read chapters outside this section. Do not give a final star
+rating. Label every observation with its chapter.
+
+SECTION TEXT:
+{section_text}"""
+
+SYNTHESIS_REVIEW_PROMPT = """Produce the final review of "{title}" from the close-reading
+reports below. Reconcile contradictions between reports and preserve chapter references.
+
+Write two explicit sections:
+
+1. LITERARY CRITIC REVIEW
+Give a fair newspaper-style review and a rating written as "N/5".
+
+2. PROFESSOR OF FICTION REVIEW
+Give a numbered list of specific, actionable defects. Each item needs a short title,
+severity, supporting chapter evidence, and a concrete revision. Do not invent quotations.
+If the reports do not establish something, say so.
+
+CLOSE-READING REPORTS:
+{section_reviews}"""
+
+
+def call_reviewer(prompt, max_tokens=8000):
+    """Call the configured review model."""
     print(f"Sending to {REVIEW_MODEL} ({len(prompt):,} chars)...", file=sys.stderr)
-    resp = httpx.post(
-        f"{API_BASE}/v1/messages",
-        headers=headers, json=payload, timeout=600,
+    return call_llm(
+        prompt,
+        model=REVIEW_MODEL,
+        max_tokens=max_tokens,
+        temperature=0.3,
+        system=REVIEW_SYSTEM,
+        timeout=600,
     )
-    resp.raise_for_status()
-    return resp.json()["content"][0]["text"]
+
+
+def build_review_chunks():
+    """Group complete chapters into requests that fit the configured context."""
+    chapters = sorted(CHAPTERS_DIR.glob("ch_*.md"))
+    chunks = []
+    current = []
+
+    for chapter in chapters:
+        candidate = current + [chapter]
+        candidate_text = "\n\n---\n\n".join(path.read_text() for path in candidate)
+        probe = SECTION_REVIEW_PROMPT.format(
+            title=get_title(),
+            section_number=1,
+            section_count=1,
+            chapter_names=", ".join(path.stem for path in candidate),
+            section_text=candidate_text,
+        )
+        if current and not prompt_fits_context(
+            probe,
+            system=REVIEW_SYSTEM,
+            max_tokens=2_500,
+        ):
+            chunks.append(current)
+            current = [chapter]
+        else:
+            current = candidate
+
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def review_manuscript(title, manuscript):
+    """Use one request when possible, otherwise close-read chunks then synthesize."""
+    prompt = REVIEW_PROMPT.format(title=title, manuscript=manuscript)
+    if prompt_fits_context(prompt, system=REVIEW_SYSTEM, max_tokens=8_000):
+        return call_reviewer(prompt)
+
+    chunks = build_review_chunks()
+    reports = []
+    for index, paths in enumerate(chunks, start=1):
+        names = ", ".join(path.stem for path in paths)
+        print(f"Review pass {index}/{len(chunks)}: {names}", file=sys.stderr)
+        section_text = "\n\n---\n\n".join(path.read_text() for path in paths)
+        section_prompt = SECTION_REVIEW_PROMPT.format(
+            title=title,
+            section_number=index,
+            section_count=len(chunks),
+            chapter_names=names,
+            section_text=section_text,
+        )
+        report = call_reviewer(section_prompt, max_tokens=2_500)
+        reports.append(f"## Section {index}: {names}\n{report}")
+
+    synthesis_prompt = SYNTHESIS_REVIEW_PROMPT.format(
+        title=title,
+        section_reviews="\n\n".join(reports),
+    )
+    return call_reviewer(synthesis_prompt)
 
 
 def get_title():
@@ -97,18 +186,31 @@ def parse_review(review_text):
     items = []
     
     # Split into critic and professor sections
-    sections = re.split(r'(?:Professor|PROFESSOR|professor).*?(?:Review|Assessment|Analysis|Craft)', 
-                        review_text, maxsplit=1)
+    sections = re.split(
+        r'professor.*?(?:review|assessment|analysis|craft)',
+        review_text,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )
     
     critic_text = sections[0] if sections else review_text
     professor_text = sections[1] if len(sections) > 1 else ""
     
     # Extract star rating
-    star_match = re.search(r'★+½?|(\d+\.?\d*)\s*/?\s*(?:out of\s*)?(?:five|5)', critic_text)
+    star_match = re.search(
+        r'(?P<symbols>★+)(?P<half>½)?|'
+        r'(?P<number>\d+(?:\.\d+)?)\s*/?\s*(?:out of\s*)?(?:five|5)',
+        critic_text,
+        re.IGNORECASE,
+    )
     stars = None
     if star_match:
-        star_str = star_match.group(0)
-        stars = star_str.count('★') + (0.5 if '½' in star_str else 0)
+        if star_match.group("number"):
+            stars = float(star_match.group("number"))
+        else:
+            stars = len(star_match.group("symbols")) + (
+                0.5 if star_match.group("half") else 0
+            )
     
     # Extract professor's numbered items
     # Look for patterns like "1. Title" or "Problem:" or "Suggestion:"
@@ -210,9 +312,7 @@ def cmd_review(args):
     title = get_title()
     manuscript = build_manuscript()
     
-    prompt = REVIEW_PROMPT.format(title=title, manuscript=manuscript)
-    
-    review_text = call_opus(prompt)
+    review_text = review_manuscript(title, manuscript)
     
     # Save raw review
     LOGS_DIR.mkdir(exist_ok=True)
@@ -273,14 +373,15 @@ def cmd_parse(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Deep manuscript review via Opus")
+    parser = argparse.ArgumentParser(description="Deep manuscript review")
     parser.add_argument("--output", "-o", default=None, help="Save human-readable review to file")
     parser.add_argument("--parse", action="store_true", help="Parse most recent review")
     
     args = parser.parse_args()
     
-    if not API_KEY:
-        print("ERROR: ANTHROPIC_API_KEY not set in .env", file=sys.stderr)
+    error = configuration_error()
+    if error:
+        print(f"ERROR: {error}", file=sys.stderr)
         sys.exit(1)
     
     if args.parse:

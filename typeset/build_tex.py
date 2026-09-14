@@ -1,138 +1,133 @@
 #!/usr/bin/env python3
-"""Build LaTeX source from chapter files."""
+"""Build book-specific LaTeX sources from every current chapter file."""
+
+from __future__ import annotations
+
+import json
 import re
-import os
+from pathlib import Path
 
-CHAPTERS_DIR = "/home/jeffq/autonovel/chapters"
-OUT_DIR = "/home/jeffq/autonovel/typeset"
+BASE_DIR = Path(__file__).resolve().parent.parent
+CHAPTERS_DIR = BASE_DIR / "chapters"
+OUT_DIR = BASE_DIR / "typeset"
 
-def latex_escape(t):
-    t = t.replace('&', '\\&')
-    t = t.replace('%', '\\%')
-    t = t.replace('$', '\\$')
-    t = t.replace('#', '\\#')
-    t = t.replace('_', '\\_')
-    return t
 
-def md_to_latex(body):
+def latex_escape(text: str) -> str:
+    replacements = {
+        "\\": r"\textbackslash{}",
+        "&": r"\&",
+        "%": r"\%",
+        "$": r"\$",
+        "#": r"\#",
+        "_": r"\_",
+        "{": r"\{",
+        "}": r"\}",
+        "~": r"\textasciitilde{}",
+        "^": r"\textasciicircum{}",
+    }
+    return "".join(replacements.get(char, char) for char in text)
+
+
+def md_to_latex(body: str) -> str:
     result = []
-    for line in body.split('\n'):
-        s = line.strip()
-        if s == '---':
-            result.append('\n\\scenebreak\n')
-        elif s == '':
-            result.append('')
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped == "---":
+            result.append(r"\scenebreak")
+        elif not stripped:
+            result.append("")
         else:
-            s = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)', r'\\textit{\1}', s)
-            s = latex_escape(s)
-            s = s.replace('\u2014', '---')
-            s = s.replace('\u2013', '--')
-            s = s.replace('\u201c', '``')
-            s = s.replace('\u201d', "''")
-            s = s.replace('\u2018', '`')
-            s = s.replace('\u2019', "'")
-            s = s.replace('\u2026', '\\ldots{}')
-            # Convert straight ASCII quotes to LaTeX open/close
-            # " at start of line or after space/punctuation = open (``)
-            # " elsewhere = close ('')
-            s = re.sub(r'(?<=\s)"(?=\w)', '``', s)    # space then "word
-            s = re.sub(r'^"(?=\w)', '``', s)            # line-start "word
-            s = re.sub(r'(?<=\w)"(?=[\s.,;:!?\-])', "''", s)  # word" then punct/space
-            s = re.sub(r'(?<=\w)"$', "''", s)           # word" at line-end
-            s = re.sub(r'(?<=[\.\?\!])"', "''", s)      # punctuation" 
-            # Catch any remaining straight quotes (open if after space, close otherwise)
-            s = re.sub(r'(?<=\s)"', '``', s)
-            s = re.sub(r'"(?=\s)', "''", s)
-            s = re.sub(r'^"', '``', s)
-            result.append(s)
-    return '\n'.join(result)
+            escaped = latex_escape(line)
+            escaped = re.sub(r"\*([^*]+)\*", r"\\textit{\1}", escaped)
+            escaped = escaped.replace("—", "---").replace("–", "--")
+            result.append(escaped)
+    return "\n".join(result)
 
-def make_drop_cap(latex_body):
-    """Extract first paragraph and wrap first letter in lettrine."""
-    lines = latex_body.split('\n')
-    first_para = []
-    rest_start = 0
-    found = False
-    
-    for i, l in enumerate(lines):
-        if not found and l.strip():
-            found = True
-        if found:
-            if l.strip() == '' or l.strip().startswith('\\scenebreak'):
-                rest_start = i
-                break
-            first_para.append(l)
-        else:
-            rest_start = i + 1
-    
-    if not first_para:
-        return latex_body
-    
-    para_text = ' '.join(first_para)
-    rest = '\n'.join(lines[rest_start:])
-    
-    if len(para_text) < 2:
-        return latex_body
-    
-    first_letter = para_text[0]
-    after_first = para_text[1:]
-    
-    # Find the rest of the first word to put in the lettrine second arg
-    # e.g. "Cass was awake" -> lettrine{C}{ass} was awake
-    space_idx = after_first.find(' ')
-    if space_idx > 0:
-        word_rest = after_first[:space_idx]
-        para_rest = after_first[space_idx:]
-    else:
-        word_rest = after_first
-        para_rest = ""
-    
-    drop = f"\\lettrine[lines=2, lhang=0.1, nindent=0.2em]{{{first_letter}}}{{{word_rest}}}{para_rest}"
-    return drop + '\n\n' + rest
 
-chapters_tex = []
-for n in range(1, 20):
-    path = os.path.join(CHAPTERS_DIR, f"ch_{n:02d}.md")
-    with open(path) as f:
-        text = f.read()
-    
-    lines = text.strip().split('\n')
-    title_line = lines[0].lstrip('# ').strip()
-    body = '\n'.join(lines[1:]).strip()
-    
-    if ': ' in title_line:
-        label, subtitle = title_line.split(': ', 1)
-    else:
-        label, subtitle = title_line, ""
-    
-    chapter_name = subtitle if subtitle else label
-    latex_body = md_to_latex(body)
-    latex_body = make_drop_cap(latex_body)
-    
-    # Check for chapter ornament (prefer vector PDF over raster PNG)
-    art_base = os.path.dirname(CHAPTERS_DIR)
-    pdf_path = os.path.join(art_base, "art", "pdf", f"ornament_ch{n:02d}.pdf")
-    png_path = os.path.join(art_base, "art", f"ornament_ch{n:02d}.png")
-    ornament_tex = ""
-    ornament_file = None
-    if os.path.exists(pdf_path):
-        ornament_file = pdf_path
-    elif os.path.exists(png_path):
-        ornament_file = png_path
-    if ornament_file:
-        ornament_tex = (
-            f"\\begin{{center}}\n"
-            f"\\includegraphics[width=0.8in]{{{ornament_file}}}\n"
-            f"\\end{{center}}\n"
-            f"\\vspace{{0.15in}}\n"
-        )
-    
-    chapters_tex.append(f"\\chapter{{{latex_escape(chapter_name)}}}\n\n{ornament_tex}{latex_body}\n")
-    print(f"  {n:2d}. {title_line}")
+def load_book() -> dict:
+    defaults = {"title": "Untitled Novel", "author": "", "genre": "Fiction"}
+    path = BASE_DIR / "book.json"
+    if path.exists():
+        try:
+            candidate = json.loads(path.read_text())
+            if isinstance(candidate, dict):
+                defaults.update(candidate)
+        except (OSError, json.JSONDecodeError):
+            pass
+    return defaults
 
-content = '\n\\clearpage\n\n'.join(chapters_tex)
 
-with open(os.path.join(OUT_DIR, "chapters_content.tex"), 'w') as f:
-    f.write(content)
+def chapter_paths() -> list[Path]:
+    def number(path: Path) -> int:
+        match = re.search(r"(\d+)", path.stem)
+        return int(match.group(1)) if match else 0
 
-print(f"\nWrote {len(chapters_tex)} chapters to typeset/chapters_content.tex")
+    return sorted(CHAPTERS_DIR.glob("ch_*.md"), key=number)
+
+
+def build_chapters() -> int:
+    rendered = []
+    for path in chapter_paths():
+        text = path.read_text().strip()
+        if not text:
+            continue
+        lines = text.splitlines()
+        title = lines[0].lstrip("# ").strip()
+        if ": " in title:
+            title = title.split(": ", 1)[1]
+        rendered.append(f"\\chapter{{{latex_escape(title)}}}\n\n{md_to_latex(chr(10).join(lines[1:]).strip())}\n")
+        print(f"  {path.name}: {title}")
+    (OUT_DIR / "chapters_content.tex").write_text("\n\\clearpage\n\n".join(rendered))
+    return len(rendered)
+
+
+def build_document() -> None:
+    book = load_book()
+    title = latex_escape(str(book.get("title") or "Untitled Novel"))
+    author = latex_escape(str(book.get("author") or ""))
+    genre = latex_escape(str(book.get("genre") or "Fiction"))
+    document = rf"""\documentclass[11pt,openany]{{book}}
+\usepackage[paperwidth=5.5in,paperheight=8.5in,inner=0.85in,outer=0.65in,top=0.75in,bottom=0.85in,headheight=14pt]{{geometry}}
+\usepackage{{fontspec}}
+\setmainfont{{EB Garamond}}[Ligatures=TeX]
+\usepackage{{microtype}}
+\usepackage{{setspace}}
+\setstretch{{1.12}}
+\usepackage{{fancyhdr}}
+\usepackage{{titlesec}}
+\usepackage{{hyperref}}
+\hypersetup{{pdftitle={{{title}}},pdfauthor={{{author}}},pdfsubject={{{genre} Novel}},hidelinks}}
+\setlength{{\parindent}}{{1.5em}}
+\setlength{{\parskip}}{{0pt}}
+\newcommand{{\scenebreak}}{{\par\vspace{{0.6\baselineskip}}\noindent\hfil{{\small\symbol{{"2022}}\quad\symbol{{"2022}}\quad\symbol{{"2022}}}}\hfil\par\vspace{{0.6\baselineskip}}}}
+\renewcommand{{\thechapter}}{{\Roman{{chapter}}}}
+\titleformat{{\chapter}}[display]{{\normalfont\centering}}{{\vspace*{{1.2in}}\footnotesize\textsc{{chapter \thechapter}}}}{{4pt}}{{\Large\itshape}}[\vspace{{0.5in}}]
+\pagestyle{{fancy}}
+\fancyhf{{}}
+\fancyhead[LE]{{\small\textsc{{{title}}}}}
+\fancyhead[RO]{{\small\textit{{\leftmark}}}}
+\fancyfoot[C]{{\thepage}}
+\renewcommand{{\headrulewidth}}{{0pt}}
+\begin{{document}}
+\frontmatter
+\thispagestyle{{empty}}
+\begin{{center}}
+\vspace*{{2in}}
+{{\Huge\textsc{{{title}}}}}\\[0.6in]
+{{\large\textit{{A Novel}}}}\\[1in]
+{{\Large\textsc{{{author}}}}}
+\end{{center}}
+\clearpage
+\mainmatter
+\input{{typeset/chapters_content.tex}}
+\end{{document}}
+"""
+    (OUT_DIR / "novel.tex").write_text(document)
+
+
+if __name__ == "__main__":
+    count = build_chapters()
+    if count == 0:
+        raise SystemExit("No chapter files found.")
+    build_document()
+    print(f"Wrote {count} chapters and book-specific typeset/novel.tex")

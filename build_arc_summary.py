@@ -8,32 +8,24 @@ import os
 import re
 from pathlib import Path
 from dotenv import load_dotenv
+from book_config import chapter_numbers, load_book, load_seed
+from llm_client import call_llm
 
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env")
 
 WRITER_MODEL = os.environ.get("AUTONOVEL_WRITER_MODEL", "claude-sonnet-4-6")
-API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-API_BASE = os.environ.get("AUTONOVEL_API_BASE_URL", "https://api.anthropic.com")
 CHAPTERS_DIR = BASE_DIR / "chapters"
 
 def call_writer(prompt, max_tokens=4000):
-    import httpx
-    headers = {
-        "x-api-key": API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
-    payload = {
-        "model": WRITER_MODEL,
-        "max_tokens": max_tokens,
-        "temperature": 0.1,
-        "system": "You summarize novel chapters precisely. State what HAPPENS, what CHANGES, and what QUESTIONS are left open. No evaluation. No praise. Just events and shifts.",
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    resp = httpx.post(f"{API_BASE}/v1/messages", headers=headers, json=payload, timeout=120)
-    resp.raise_for_status()
-    return resp.json()["content"][0]["text"]
+    return call_llm(
+        prompt,
+        model=WRITER_MODEL,
+        max_tokens=max_tokens,
+        temperature=0.1,
+        system="You summarize novel chapters precisely. State what HAPPENS, what CHANGES, and what QUESTIONS are left open. No evaluation. No praise. Just events and shifts.",
+        timeout=120,
+    )
 
 def extract_key_passages(text):
     """Get opening, closing, and best dialogue from a chapter."""
@@ -51,8 +43,11 @@ def extract_key_passages(text):
 
 def main():
     summaries = []
-    
-    for ch in range(1, 20):
+    chapters = chapter_numbers()
+    if not chapters:
+        raise SystemExit("No chapter files found.")
+
+    for ch in chapters:
         path = CHAPTERS_DIR / f"ch_{ch:02d}.md"
         text = path.read_text()
         wc = len(text.split())
@@ -80,24 +75,18 @@ def main():
         print(f"Ch {ch}: summarized ({wc}w)")
     
     # Calculate total word count
-    total_wc = sum(len((CHAPTERS_DIR / f"ch_{c:02d}.md").read_text().split()) for c in range(1, 20))
+    total_wc = sum(len((CHAPTERS_DIR / f"ch_{c:02d}.md").read_text().split()) for c in chapters)
     
     # Assemble
-    full = f"""# THE SECOND SON OF THE HOUSE OF BELLS
+    book = load_book()
+    full = f"""# {book['title']}
 ## Full-Arc Summary for Reader Panel
 
 This document contains chapter summaries, opening/closing passages,
-and key dialogue for all 23 chapters. Total novel: {total_wc:,} words.
+and key dialogue for all {len(chapters)} chapters. Total novel: {total_wc:,} words.
 
-PREMISE: In Cantamura, a city where law is sung into binding through
-specific musical intervals, 14-year-old Cass Bellwright can hear when
-someone is lying -- a quarter-tone between F and F-sharp that causes
-him physical pain. His older brother Perin has been bound to service
-in the House of Corda for 10 years through a contract their father
-allowed. The bells their family maintains contain a secret: a question
-("Do you consent to be bound?") embedded in the sub-harmonics by the
-city's founder 200 years ago. No one has ever heard it. No one has
-ever answered. Every binding in Cantamura is technically void.
+STORY SEED:
+{load_seed()}
 
 ---
 

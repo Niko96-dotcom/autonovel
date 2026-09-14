@@ -27,16 +27,12 @@ BASE_DIR = Path(__file__).parent
 
 # Load .env file if present
 from dotenv import load_dotenv
+from llm_client import call_llm
 load_dotenv(BASE_DIR / ".env")
 
 # Judge uses Opus 4.6 (harsh, critical). Writer uses Sonnet 4.6 (fast, long context).
 # Intentionally different to avoid self-congratulation.
 JUDGE_MODEL = os.environ.get("AUTONOVEL_JUDGE_MODEL", "claude-opus-4-6")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-API_BASE_URL = os.environ.get("AUTONOVEL_API_BASE_URL", "https://api.anthropic.com")
-
-# Beta header to unlock 1M context window on both Opus 4.6 and Sonnet 4.6
-ANTHROPIC_BETA = "context-1m-2025-08-07"
 CHAPTERS_DIR = BASE_DIR / "chapters"
 EVAL_LOG_DIR = BASE_DIR / "eval_logs"
 EVAL_LOG_DIR.mkdir(exist_ok=True)
@@ -250,6 +246,7 @@ def load_file(path):
 def load_layer_files():
     """Load all planning layer files."""
     return {
+        "seed": load_file(BASE_DIR / "seed.txt"),
         "voice": load_file(BASE_DIR / "voice.md"),
         "world": load_file(BASE_DIR / "world.md"),
         "characters": load_file(BASE_DIR / "characters.md"),
@@ -273,35 +270,19 @@ def load_all_chapters():
 
 
 def call_judge(prompt, max_tokens=2000):
-    """Call the Anthropic judge LLM and return its response text."""
-    import httpx
-
-    headers = {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "anthropic-beta": ANTHROPIC_BETA,
-        "content-type": "application/json",
-    }
-    payload = {
-        "model": JUDGE_MODEL,
-        "max_tokens": max_tokens,
-        "temperature": 0.3,
-        "system": "You are a literary critic and novel editor. "
-                  "You evaluate fiction with precision. Always respond with valid JSON. "
-                  "No markdown fences, no preamble -- just the JSON object.",
-        "messages": [
-            {"role": "user", "content": prompt},
-        ],
-    }
-
-    resp = httpx.post(
-        f"{API_BASE_URL}/v1/messages",
-        headers=headers,
-        json=payload,
+    """Call the configured judge LLM and return its response text."""
+    return call_llm(
+        prompt,
+        model=JUDGE_MODEL,
+        max_tokens=max_tokens,
+        temperature=0.3,
+        system=(
+            "You are a literary critic and novel editor. "
+            "You evaluate fiction with precision. Always respond with valid JSON. "
+            "No markdown fences, no preamble -- just the JSON object."
+        ),
         timeout=180,
     )
-    resp.raise_for_status()
-    return resp.json()["content"][0]["text"]
 
 
 def parse_json_response(text):
@@ -348,7 +329,7 @@ def parse_json_response(text):
 
 # --- Foundation Evaluation ---
 
-FOUNDATION_PROMPT = """Evaluate these fantasy novel planning documents.
+FOUNDATION_PROMPT = """Evaluate these novel planning documents against the author's brief.
 
 SCORING CALIBRATION (read this before scoring anything):
 
@@ -371,6 +352,9 @@ MANDATORY: For EVERY dimension, before scoring, you must identify:
   (a) The single biggest GAP or WEAKNESS in that area
   (b) A specific, actionable improvement that would raise the score
   If you cannot find a gap, explain why you believe one doesn't exist.
+
+STORY SEED (explicit author choices take priority):
+{seed}
 
 VOICE DEFINITION:
 {voice}
@@ -395,9 +379,8 @@ CROSS-CHECKS (perform these before scoring):
    - Deduct from character_distinctiveness if multiple characters
      share the same sentence structures
 2. Check for missing NEGATIVE SPACE -- what's absent?
-   - Are there gaps in the magic system that would block a specific
-     plot scene? (e.g., can Cass hear lies in written documents?
-     What happens during the climax -- what rule resolves it?)
+   - Are there gaps in the story's central systems that would block a specific
+     plot scene? What happens during the climax, and what established rule resolves it?
    - Are there characters needed for the plot who don't exist?
    - Are there scenes the outline demands that the world can't support?
 3. Check for CONVENIENT GAPS vs DELIBERATE MYSTERY:
@@ -414,8 +397,8 @@ CROSS-CHECKS (perform these before scoring):
 Score these dimensions (gap + improvement required for each):
 
 LORE & WORLDBUILDING:
-- magic_system: Hard rules with COSTS and LIMITATIONS per Sanderson's
-  Second Law. Could a writer resolve the CLIMACTIC CONFLICT using only
+- magic_system: For any magic, technology, legal, social, romantic, or other central
+  story system, are there hard rules with COSTS and LIMITATIONS? Could a writer resolve the CLIMACTIC CONFLICT using only
   rules already established? Are costs plot-driving, not decorative?
   Are there at least 3 societal implications explored with specificity?
   Is the system TESTABLE -- could you write a courtroom scene, a
@@ -524,10 +507,10 @@ def evaluate_foundation():
 
 # --- Chapter Evaluation ---
 
-CHAPTER_PROMPT = """Evaluate this fantasy novel chapter against the planning docs.
+CHAPTER_PROMPT = """Evaluate this novel chapter against the author's brief and planning docs.
 
 SCORING CALIBRATION:
-  9-10: Among the best chapters you've read in published fantasy. Name
+  9-10: Among the best chapters you've read in its published genre. Name
         a specific published chapter it competes with, or don't give 9+.
   7-8:  Strong, publishable with editorial polish. Specific flaws exist
         but don't break the reading experience.
@@ -545,6 +528,9 @@ MANDATORY: For each dimension, you must identify:
   (a) The single WEAKEST MOMENT -- quote the specific sentence or passage
   (b) What would make it better -- a concrete revision, not a vague note
   If every sentence is perfect, you're not reading carefully enough.
+
+STORY SEED:
+{seed}
 
 VOICE DEFINITION:
 {voice}
@@ -600,7 +586,7 @@ Score these dimensions:
 - voice_adherence: Does the prose match voice.md Part 2? Check: sentence
   rhythm variation, vocabulary wells, body-before-emotion principle,
   the specific tone described. Quote the strongest voice moment AND
-  the weakest. Does ANY passage sound like generic fantasy prose that
+  the weakest. Does ANY passage sound like generic genre prose that
   could appear in any novel? If yes, score 7 max.
 
 - beat_coverage: Did it hit every beat from the outline? Were beats
@@ -610,8 +596,8 @@ Score these dimensions:
 
 - character_voice: Remove all dialogue tags mentally. Can you tell who's
   speaking? Do characters ever sound alike? Does dialogue read as speech
-  or as written prose? Does Cass sound like a specific 14-year-old, or
-  like "young protagonist"? Does anyone say something surprising -- not
+  or as written prose? Does the viewpoint character sound like the specific
+  person in characters.md rather than a generic protagonist? Does anyone say something surprising -- not
   just the right thing, but a REAL thing? Characters who never stumble,
   hesitate, or say something slightly wrong are AI-pattern characters.
 
@@ -621,7 +607,7 @@ Score these dimensions:
 
 - prose_quality: Sentence variety (measure: do 3+ consecutive sentences
   start the same way?). Specificity (concrete nouns > abstract).
-  Metaphors from Cass's experience, not from a thesaurus. Show-don't-tell
+  Metaphors from the viewpoint character's experience, not from a thesaurus. Show-don't-tell
   at emotional peaks. QUOTE the weakest sentence and explain why. Also
   check for: repeated phrases, leaned-on constructions, paragraphs that
   could be cut without loss.
@@ -635,7 +621,7 @@ Score these dimensions:
   magic system rules, timeline, established events, physical descriptions.
 
 - lore_integration: Does the world do WORK in this chapter, or is it
-  set dressing? A scene that could happen in any fantasy city with
+  set dressing? A scene that could happen in any interchangeable setting with
   find-and-replace on proper nouns scores 5 max.
 
 - engagement: Would a reader turn the page? Where does tension come from --
@@ -688,6 +674,7 @@ def evaluate_chapter(chapter_num):
     prev_tail = prev_text[-3000:] if len(prev_text) > 3000 else prev_text
 
     prompt = CHAPTER_PROMPT.format(
+        seed=layers["seed"],
         voice=layers["voice"],
         world=layers["world"][:4000],  # truncate world bible
         characters=layers["characters"],
@@ -712,8 +699,11 @@ def evaluate_chapter(chapter_num):
 
 # --- Full Novel Evaluation ---
 
-FULL_NOVEL_PROMPT = """Evaluate this complete fantasy novel holistically.
+FULL_NOVEL_PROMPT = """Evaluate this complete novel holistically in the context of its genre and author brief.
 You have the planning docs and ALL chapter summaries with their individual scores.
+
+STORY SEED:
+{seed}
 
 VOICE DEFINITION:
 {voice}
@@ -777,6 +767,7 @@ def evaluate_full():
         )
 
     prompt = FULL_NOVEL_PROMPT.format(
+        seed=layers["seed"],
         voice=layers["voice"],
         world_summary=layers["world"][:3000],
         characters=layers["characters"],

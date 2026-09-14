@@ -8,3 +8,7 @@ __pycache__/
 typeset/*.pdf
 typeset/chapters_content.tex
 *.pdf
+.build/
+dist/
+.autonovel/backups/
+.autonovel/secrets/

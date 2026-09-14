@@ -1,126 +1,67 @@
 #!/usr/bin/env python3
-"""
-One-shot world.md generator for foundation phase.
-Reads seed.txt + voice.md, calls the writer model, outputs world.md content.
-"""
+"""Generate world.md from the current Story Seed and voice."""
+
 import os
 import sys
-from pathlib import Path
+
 from dotenv import load_dotenv
 
-BASE_DIR = Path(__file__).parent
+from book_config import BASE_DIR, load_book, load_seed, voice_identity
+from llm_client import call_llm
+
 load_dotenv(BASE_DIR / ".env")
-
 WRITER_MODEL = os.environ.get("AUTONOVEL_WRITER_MODEL", "claude-sonnet-4-6")
-API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-API_BASE = os.environ.get("AUTONOVEL_API_BASE_URL", "https://api.anthropic.com")
 
-def call_writer(prompt, max_tokens=16000):
-    import httpx
-    headers = {
-        "x-api-key": API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
-    payload = {
-        "model": WRITER_MODEL,
-        "max_tokens": max_tokens,
-        "temperature": 0.7,
-        "system": (
-            "You are a fantasy worldbuilder with deep knowledge of Sanderson's Laws, "
-            "Le Guin's prose philosophy, and TTRPG-quality lore design. "
-            "You write world bibles that are specific, interconnected, and imply depth "
-            "beyond what's stated. You never use AI slop words (delve, tapestry, myriad, etc). "
-            "You write in clean, direct prose. Every rule has a cost. Every cultural detail "
-            "implies a history. Every location has a sensory signature."
-        ),
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    resp = httpx.post(f"{API_BASE}/v1/messages", headers=headers, json=payload, timeout=300)
-    resp.raise_for_status()
-    return resp.json()["content"][0]["text"]
 
-seed = (BASE_DIR / "seed.txt").read_text()
-voice = (BASE_DIR / "voice.md").read_text()
-craft = (BASE_DIR / "CRAFT.md").read_text()
+def main():
+    seed = load_seed()
+    if not seed.strip():
+        raise SystemExit("seed.txt is empty. Complete New Book Setup first.")
+    book = load_book()
+    voice_path = BASE_DIR / "voice.md"
+    voice = voice_identity(voice_path.read_text() if voice_path.exists() else "")
 
-# Extract voice Part 2 only (the novel-specific voice)
-voice_lines = voice.split('\n')
-part2_start = next(i for i, l in enumerate(voice_lines) if 'Part 2' in l)
-voice_part2 = '\n'.join(voice_lines[part2_start:])
+    prompt = f"""Build the definitive world reference for this {book['genre']} novel.
 
-prompt = f"""Build a complete world bible for this fantasy novel. This is the WORLD.MD file -- 
-the definitive reference for everything that EXISTS in this world. A writer should be able 
-to resolve any worldbuilding question from this document alone.
-
-SEED CONCEPT:
+STORY SEED:
 {seed}
 
-VOICE IDENTITY (the tone and register of this novel):
-{voice_part2}
+VOICE IDENTITY:
+{voice}
 
-CRAFT REQUIREMENTS (from CRAFT.md -- follow these):
-- Magic system needs HARD RULES with COSTS and LIMITATIONS per Sanderson's Second Law
-- Limitations >= powers in narrative prominence
-- Trace implications of magic through society, economy, law, religion
-- At least 2-3 societal implications of magic explored in depth
-- History must create PRESENT-DAY TENSIONS that drive the plot (not just backdrop)
-- Geography must be specific and sensory (not generic fantasy)
-- Iceberg principle: imply more than you state
-- Interconnection: pulling one thread should move everything
+Write WORLD.MD in Markdown. Adapt the sections to this story rather than assuming fantasy.
+Cover the places and social systems the plot needs; relevant history and present tensions;
+technology, magic, law, or other speculative systems when present; hard rules, costs,
+limitations, and edge cases; factions and institutions; daily life and culture; sensory
+signatures for important locations; travel and geography; and a final list of hard
+consistency rules.
 
-STRUCTURE THE DOCUMENT WITH THESE SECTIONS:
+Requirements:
+- Be concrete enough that a scene writer can make decisions without inventing contradictions.
+- Trace consequences: every major system changes work, family, status, power, and daily life.
+- Give any extraordinary capability at least as much limitation as power.
+- Interconnect setting, conflict, character, and theme.
+- Include only details useful to this particular story; no encyclopedic padding.
+- Never overwrite an explicit choice in the Story Seed.
+- Target 2,500-4,000 dense words. Output Markdown only."""
 
-## Cosmology & History
-A timeline of major events. Focus on events that create PRESENT-DAY tensions.
-Include the founding myth, key turning points, and recent events that matter to the plot.
+    result = call_llm(
+        prompt,
+        model=WRITER_MODEL,
+        max_tokens=16_000,
+        temperature=0.65,
+        system=(
+            "You are a genre-flexible world and setting designer. Every rule has a cost, "
+            "every institution has beneficiaries and victims, and every location has a sensory identity. "
+            "You avoid generic lore and AI filler."
+        ),
+        timeout=600,
+    ).strip()
+    path = BASE_DIR / "world.md"
+    path.write_text(result + "\n")
+    print(f"Saved {path.name} ({len(result.split())} words)", file=sys.stderr)
+    print(result)
 
-## Magic System
-### Hard Rules (Tonal Law)
-Specific, testable rules. What intervals do what. What progressions bind.
-What happens when you break the rules. Include COSTS and LIMITATIONS prominently.
 
-### Soft Magic (Cass's Gift)
-What he perceives, how it works, what it costs HIM specifically.
-This should be mysterious but have consistent internal logic.
-
-### Societal Implications
-How does tonal law shape: governance, commerce, education, class structure,
-crime, family life, childhood, aging, disability?
-
-## Geography
-Cantamura's physical layout, districts, the natural amphitheater's acoustic properties.
-Neighboring places (at least 2-3). Sensory signatures for each location.
-
-## Factions & Politics
-Who holds power, who wants it, who's being crushed by it.
-At least 3-4 factions with opposing interests.
-
-## Bestiary / Flora / Natural World
-What's unique about the natural world in and around Cantamura?
-
-## Cultural Details
-Customs, taboos, festivals, food, clothing, coming-of-age rituals.
-Things that make daily life feel SPECIFIC.
-
-## Internal Consistency Rules
-Hard constraints a writer must not violate. The physics of sound in this world.
-What's possible and what's not.
-
-IMPORTANT:
-- Be SPECIFIC. Not "the city has districts" but name them, describe them, 
-  give them sensory signatures.
-- Every rule should have a COST or LIMITATION stated alongside it.
-- Include 2-3 facts per section that are unexplained, hinting at deeper systems 
-  (iceberg depth).
-- Facts should INTERCONNECT: the magic should shape the politics, the geography 
-  should shape the culture, the history should explain current faction conflicts.
-- Write in clean, direct prose. No AI slop. No "rich tapestry." No "delving."
-- The world should feel grounded and LIVED-IN, not imagined. Think: what does 
-  breakfast smell like? What do children play? How do old people complain?
-- Target ~3000-4000 words. Dense, not padded.
-"""
-
-print("Calling writer model...", file=sys.stderr)
-result = call_writer(prompt)
-print(result)
+if __name__ == "__main__":
+    main()

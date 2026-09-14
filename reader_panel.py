@@ -13,13 +13,13 @@ import re
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
+from book_config import chapter_numbers, load_book
+from llm_client import call_llm
 
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env")
 
 JUDGE_MODEL = os.environ.get("AUTONOVEL_JUDGE_MODEL", "claude-opus-4-6")
-API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-API_BASE = os.environ.get("AUTONOVEL_API_BASE_URL", "https://api.anthropic.com")
 
 READERS = {
     "editor": {
@@ -38,20 +38,20 @@ READERS = {
     "genre_reader": {
         "name": "The Genre Reader",
         "system": (
-            "You are an avid fantasy reader who reads 50+ novels a year. "
+            "You are an avid reader in this novel's genre who reads 50+ novels a year. "
             "You care about pacing, mystery, worldbuilding payoff, and whether "
             "you want to keep turning pages. You get bored by beautiful prose "
             "that doesn't GO anywhere. You notice when an investigation stalls, "
             "when tension plateaus, when the author is more in love with their "
-            "world than their story. You compare everything to Sanderson, Le Guin, "
-            "Jemisin, Rothfuss, Hobb. You are generous with what you love and "
+            "world than their story. You compare the manuscript to strong published work "
+            "with the same genre and audience. You are generous with what you love and "
             "blunt about what bores you. You respond with valid JSON only."
         ),
     },
     "writer": {
         "name": "The Writer",
         "system": (
-            "You are a published fantasy author with 5 novels and a Hugo nomination. "
+            "You are a published novelist with five books in this manuscript's genre. "
             "You read as a craftsperson. You notice structure: where the beats fall, "
             "whether foreshadowing pays off, whether character arcs complete. You "
             "notice when technique shows versus when it disappears into the story. "
@@ -76,10 +76,10 @@ READERS = {
     },
 }
 
-READER_PROMPT = """You have just read a complete fantasy novel in summary form.
+READER_PROMPT = """You have just read a complete {genre} novel in summary form.
 The summaries include chapter-by-chapter events, opening and closing passages
-from each chapter, and key dialogue. The full novel is 72,422 words across
-24 chapters.
+from each chapter, and key dialogue. The full novel is {word_count:,} words across
+{chapter_count} chapters.
 
 {arc_summary}
 
@@ -90,9 +90,9 @@ Respond with JSON:
 {{
   "momentum_loss": "Where does the story lose momentum? Name the specific chapter(s) and what causes the drag. If it never loses momentum, say so and explain why.",
   
-  "earned_ending": "Does the ending feel earned by everything before it? Does Cass's choice in Ch 22 land? Does the final image in Ch 24 mirror Ch 1 in a way that satisfies? What, if anything, feels unearned?",
+  "earned_ending": "Does the ending feel earned by everything before it? Does the protagonist's climactic choice land? Does the final image transform the opening promise in a satisfying way? What, if anything, feels unearned?",
   
-  "cut_candidate": "If the novel had to be 10% shorter (~7,000 words), which chapter or section would you cut first? Why? What would be lost?",
+  "cut_candidate": "If the novel had to be 10% shorter, which chapter or section would you cut first? Why? What would be lost?",
   
   "missing_scene": "Is there a scene the novel NEEDS that it doesn't have? A conversation that should happen, a moment that's earned but never delivered, a character who deserves more page time? Be specific about where it would go.",
   
@@ -111,23 +111,26 @@ Respond with JSON:
 """
 
 def call_reader(reader_key, arc_summary):
-    import httpx
     reader = READERS[reader_key]
-    headers = {
-        "x-api-key": API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
-    payload = {
-        "model": JUDGE_MODEL,
-        "max_tokens": 4000,
-        "temperature": 0.7,  # Higher temp for personality
-        "system": reader["system"],
-        "messages": [{"role": "user", "content": READER_PROMPT.format(arc_summary=arc_summary)}],
-    }
-    resp = httpx.post(f"{API_BASE}/v1/messages", headers=headers, json=payload, timeout=300)
-    resp.raise_for_status()
-    raw = resp.json()["content"][0]["text"]
+    book = load_book()
+    chapters = chapter_numbers()
+    word_count = sum(
+        len((BASE_DIR / "chapters" / f"ch_{number:02d}.md").read_text().split())
+        for number in chapters
+    )
+    raw = call_llm(
+        READER_PROMPT.format(
+            arc_summary=arc_summary,
+            genre=book["genre"],
+            word_count=word_count,
+            chapter_count=len(chapters),
+        ),
+        model=JUDGE_MODEL,
+        max_tokens=4000,
+        temperature=0.7,
+        system=reader["system"],
+        timeout=300,
+    )
     
     # Parse JSON
     raw = raw.strip()
