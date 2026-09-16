@@ -88,9 +88,7 @@ struct ProviderSettingsView: View {
     private var providerScroll: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                settingsHeader
                 statusBanner
-                Divider().padding(.vertical, 20)
                 authenticationSection
                 Divider().padding(.vertical, 20)
                 providerSection
@@ -116,32 +114,8 @@ struct ProviderSettingsView: View {
         }
     }
 
-    private var settingsHeader: some View {
-        HStack(alignment: .top, spacing: 16) {
-            Image(systemName: "point.3.filled.connected.trianglepath.dotted")
-                .font(.system(size: 24, weight: .medium))
-                .foregroundStyle(.white)
-                .frame(width: 52, height: 52)
-                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 5) {
-                SectionEyebrow(text: "Intelligence")
-                Text("Choose the mind behind the manuscript")
-                    .font(.system(.title2, design: .serif, weight: .semibold))
-                Text("Use a hosted API, a private local model, or any endpoint that speaks one of AutoNovel’s supported protocols.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
     private var providerSection: some View {
-        SettingsSection(
-            number: "02",
-            title: "Provider",
-            detail: "Presets fill the endpoint and protocol; every value stays editable."
-        ) {
+        SettingsSection(title: "Provider") {
             Picker("Provider", selection: $configuration.preset) {
                 ForEach(ProviderPreset.allCases) { preset in
                     Label(preset.title, systemImage: preset.symbol).tag(preset)
@@ -170,22 +144,13 @@ struct ProviderSettingsView: View {
     }
 
     private var modelsSection: some View {
-        SettingsSection(
-            number: "03",
-            title: "Model roles",
-            detail: "Use one model everywhere or assign different models to writing, judging, and review."
-        ) {
-            modelField("Writer", detail: "Drafts and revisions", text: $configuration.writerModel)
-            modelField("Judge", detail: "Chapter-level evaluation", text: $configuration.judgeModel)
-            modelField("Reviewer", detail: "Whole-book critique", text: $configuration.reviewModel)
+        SettingsSection(title: "Model roles") {
+            modelField("Writer", text: $configuration.writerModel)
+            modelField("Judge", text: $configuration.judgeModel)
+            modelField("Reviewer", text: $configuration.reviewModel)
 
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Context window").font(.subheadline.weight(.medium))
-                    Text("The maximum tokens your selected backend accepts.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text("Context window").font(.subheadline.weight(.medium))
                 Spacer()
                 TextField("Tokens", value: $configuration.contextSize, format: .number)
                     .textFieldStyle(.roundedBorder)
@@ -197,9 +162,8 @@ struct ProviderSettingsView: View {
 
     private var authenticationSection: some View {
         SettingsSection(
-            number: "01",
             title: "Authentication",
-            detail: "Secrets never appear in the interface after saving. Managed keys live in the Keychain, not in the project."
+            detail: "Managed keys live in the Keychain, not the project"
         ) {
             Picker("Credential source", selection: $configuration.credentialMode) {
                 ForEach(CredentialMode.allCases) { mode in
@@ -224,17 +188,14 @@ struct ProviderSettingsView: View {
                     text: $configuration.pendingAPIKey
                 )
                 .textFieldStyle(.roundedBorder)
-                Label("Stored in the macOS Keychain for this project. Pipeline runs receive it through the process environment.", systemImage: "lock.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             case .keyFile:
                 TextField("/absolute/path/to/api-key", text: $configuration.keyFilePath)
                     .textFieldStyle(.roundedBorder)
-                Text("The pipeline reads the first non-empty value from this file.")
+                Text("The pipeline reads the first non-empty value from this file")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             case .none:
-                Label("Only choose this for a trusted localhost server that does not require authentication.", systemImage: "house.and.flag")
+                Label("Only for a trusted localhost server that does not require authentication", systemImage: "house.and.flag")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -248,27 +209,22 @@ struct ProviderSettingsView: View {
                 .foregroundStyle(Color.accentColor)
             Text("AutoNovel Studio")
                 .font(.system(.largeTitle, design: .serif, weight: .bold))
-            Text("An open, local-first writing studio for building, evaluating, revising, and exporting complete novels.")
+            Text("An open, local-first writing studio for complete novels.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 390)
-            Text("Your manuscript and provider configuration stay in the project you control.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(40)
     }
 
-    private func modelField(_ title: String, detail: String, text: Binding<String>) -> some View {
+    private func modelField(_ title: String, text: Binding<String>) -> some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.medium))
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
-            .frame(width: 150, alignment: .leading)
-            TextField("Model identifier", text: text)
+            Text(title).font(.subheadline.weight(.medium))
+                .frame(width: 150, alignment: .leading)
+            TextField("", text: text)
+                .accessibilityLabel(title)
                 .textFieldStyle(.roundedBorder)
         }
     }
@@ -290,32 +246,26 @@ struct ProviderSettingsView: View {
 }
 
 private struct SettingsSection<Content: View>: View {
-    let number: String
     let title: String
-    let detail: String
+    var detail: String? = nil
     @ViewBuilder let content: Content
 
-    init(number: String, title: String, detail: String, @ViewBuilder content: () -> Content) {
-        self.number = number
+    init(title: String, detail: String? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
         self.detail = detail
         self.content = content()
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 18) {
-            Text(number)
-                .font(.caption.monospaced().weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 26, alignment: .leading)
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.headline)
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.headline)
+                if let detail {
                     Text(detail).font(.caption).foregroundStyle(.secondary)
                 }
-                content
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            content
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

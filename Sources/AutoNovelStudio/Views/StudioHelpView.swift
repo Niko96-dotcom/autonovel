@@ -18,7 +18,7 @@ struct StudioHelpView: View {
 
             Form {
                 Section("Set up a book") {
-                    Text("Open New Book Setup from the sidebar. Fill the five essential fields, then use Save in the toolbar or File > Save. Save & Continue to Start returns you to Overview.")
+                    Text("Open New Book Setup from the sidebar. Fill the five essential fields, then use Save in the toolbar or File > Save. Save and continue returns you to Overview.")
                 }
                 Section("Connect a model") {
                     Text("Choose AutoNovel Studio > Settings to set the provider, API base URL, and authentication. Private keys are stored in the macOS Keychain. Check Connection verifies the backend without starting a full run.")

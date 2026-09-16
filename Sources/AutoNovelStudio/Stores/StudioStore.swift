@@ -84,7 +84,7 @@ final class StudioStore {
         if runner.isRunning { return runner.modelStatus ?? runner.label }
         if let failure = state.lastError, state.status == "failed" {
             let failedStep = failure.step.replacingOccurrences(of: "_", with: " ")
-            return "Stopped safely at \(failedStep). Your completed work is preserved."
+            return "Stopped at \(failedStep)"
         }
         if let focus = state.currentFocus, !focus.isEmpty {
             return focus.replacingOccurrences(of: "_", with: " ").capitalized
@@ -94,7 +94,7 @@ final class StudioStore {
         case .drafting: "Writing and checking chapters in sequence"
         case .revision: "Reviewing, cutting, rewriting, and re-scoring"
         case .export: "Building the manuscript and final formats"
-        case .complete: "Your book pipeline is complete"
+        case .complete: "Complete"
         }
     }
 
@@ -193,7 +193,7 @@ final class StudioStore {
 
     func runFullPipeline() {
         runner.run(
-            label: actualDraftedChapters > 0 ? "Resuming at chapter \(actualDraftedChapters + 1)" : "Building the full novel",
+            label: actualDraftedChapters > 0 ? "Resuming at chapter \(actualDraftedChapters + 1)" : "Writing the novel",
             pythonArguments: ["run_pipeline.py"],
             extraEnvironment: pipelineEnvironment()
         )

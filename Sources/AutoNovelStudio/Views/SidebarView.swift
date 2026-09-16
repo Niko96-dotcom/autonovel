@@ -44,7 +44,7 @@ struct SidebarView: View {
                     Image(systemName: "slider.horizontal.3")
                 }
                 .buttonStyle(.plain)
-                .help("Configure model provider")
+                .help("Open settings")
             }
 
             Label(store.projectName, systemImage: "externaldrive")
@@ -66,18 +66,9 @@ struct SidebarView: View {
                     .symbolRenderingMode(.monochrome)
                     .frame(width: 19, height: 16, alignment: .center)
                     .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(section.title)
-                        .lineLimit(1)
-                    if let subtitle = section.subtitle {
-                        Text(subtitle)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(section.title)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .tag(section)

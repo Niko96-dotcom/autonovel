@@ -30,7 +30,7 @@ and previous/next navigation for focused editing.
 In the app:
 
 1. Open **New Book Setup** and fill the five essential fields.
-2. Choose **Save & Continue to Start**.
+2. Choose **Save and continue**.
 3. Open **Model Provider** in the sidebar or macOS Settings and configure the endpoint.
 4. Choose **Save & Check Connection**, then start or resume the novel from **Overview**.
 

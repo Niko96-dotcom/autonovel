@@ -39,11 +39,11 @@ struct DashboardView: View {
         }
         .alert("Start writing \(bookTitle)?", isPresented: $confirmFullRun) {
             Button("Cancel", role: .cancel) {}
-            Button(store.actualDraftedChapters > 0 ? "Resume Writing" : "Start Writing") {
+            Button(store.actualDraftedChapters > 0 ? "Resume writing" : "Start writing") {
                 store.runFullPipeline()
             }
         } message: {
-            Text("AutoNovel will continue from the verified files on disk. It will never erase your existing Book Setup, Story Seed, or completed chapters.")
+            Text("Continues from files on disk. Existing Book Setup, Story Seed, and chapters are not erased.")
         }
     }
 
@@ -74,10 +74,12 @@ struct DashboardView: View {
                         .lineLimit(2)
                         .minimumScaleFactor(0.8)
 
-                    Text(store.completionIsVerified ? "Ready to read, inspect, and export." : store.phaseDescription)
-                        .font(.title3)
-                        .foregroundStyle(.white.opacity(0.68))
-                        .lineLimit(2)
+                    if !store.completionIsVerified {
+                        Text(store.phaseDescription)
+                            .font(.title3)
+                            .foregroundStyle(.white.opacity(0.68))
+                            .lineLimit(2)
+                    }
 
                     heroAction
                         .padding(.top, 2)
@@ -140,7 +142,7 @@ struct DashboardView: View {
             .controlSize(.large)
         } else {
             Button(
-                store.actualDraftedChapters > 0 ? "Resume from Chapter \(store.actualDraftedChapters + 1)…" : "Start Writing My Novel…",
+                store.actualDraftedChapters > 0 ? "Resume writing" : "Start writing",
                 systemImage: "play.fill"
             ) {
                 confirmFullRun = true
@@ -177,8 +179,7 @@ struct DashboardView: View {
         metricDivider
         MetricReadout(
             label: "Words drafted",
-            value: store.totalWords.formatted(),
-            detail: "Live manuscript count"
+            value: store.totalWords.formatted()
         )
         metricDivider
         MetricReadout(
@@ -195,11 +196,7 @@ struct DashboardView: View {
     private var phaseRail: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    SectionEyebrow(text: "Pipeline")
-                    Text("From premise to finished manuscript")
-                        .font(.system(.title2, design: .serif, weight: .semibold))
-                }
+                SectionEyebrow(text: "Pipeline")
                 Spacer()
                 Text("Phase \(currentPhaseNumber) of 5")
                     .font(.caption.monospacedDigit())
@@ -249,12 +246,10 @@ struct DashboardView: View {
 
     private var projectChecklist: some View {
         VStack(alignment: .leading, spacing: 16) {
-            SectionEyebrow(text: "Project anatomy")
-            Text("The book stays transparent at every stage.")
-                .font(.system(.title2, design: .serif, weight: .semibold))
+            SectionEyebrow(text: "Project")
             checklistRow("Book setup", "Premise, protagonist, conflict, and world hook", done: store.hasBookBrief)
             checklistRow("Story foundation", "World, cast, voice, outline, canon, and secrets", done: store.state.foundationScore > 0)
-            checklistRow("Drafted prose", "Every accepted chapter remains directly editable", done: store.actualDraftedChapters > 0)
+            checklistRow("Drafted prose", done: store.actualDraftedChapters > 0)
             Button("Open New Book Setup", systemImage: "arrow.right") { store.selection = .setup }
                 .buttonStyle(.bordered)
         }
@@ -280,20 +275,17 @@ struct DashboardView: View {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.red)
-            } else {
-                Label(
-                    store.runner.isRunning ? (store.runner.modelStatus ?? store.runner.label) : "Ready for a real connection check",
-                    systemImage: store.runner.isRunning ? "waveform" : "checkmark.shield"
-                )
-                .font(.caption)
-                .foregroundStyle(store.runner.isRunning ? Color.accentColor : .secondary)
+            } else if store.runner.isRunning {
+                Label(store.runner.modelStatus ?? store.runner.label, systemImage: "waveform")
+                    .font(.caption)
+                    .foregroundStyle(Color.accentColor)
             }
             HStack {
                 Button("Check Connection", systemImage: "bolt.horizontal.circle") { store.runModelCheck() }
                     .buttonStyle(.borderedProminent)
                     .help("Check Connection")
                     .disabled(store.runner.isRunning)
-                SettingsLink { Label("Configure", systemImage: "slider.horizontal.3") }
+                SettingsLink { Label("Open settings", systemImage: "slider.horizontal.3") }
             }
             if !store.completionIsVerified {
                 Button("Run current phase: \(store.currentPhase.title)", systemImage: "play.fill") { store.runCurrentPhase() }
@@ -340,20 +332,15 @@ struct DashboardView: View {
     private var recentActivity: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    SectionEyebrow(text: "Recent decisions")
-                    Text("What the evaluator kept, revised, or discarded")
-                        .font(.system(.title2, design: .serif, weight: .semibold))
-                }
+                SectionEyebrow(text: "Evaluations")
                 Spacer()
-                Button("See all", systemImage: "arrow.right") { store.selection = .activity }
+                Button("Open activity", systemImage: "arrow.right") { store.selection = .activity }
             }
 
             if store.activity.isEmpty {
                 ContentUnavailableView(
-                    "No activity yet",
-                    systemImage: "clock",
-                    description: Text("Pipeline evaluations will appear here as they happen.")
+                    "No evaluations yet",
+                    systemImage: "clock"
                 )
                 .frame(minHeight: 110)
             } else {
@@ -384,16 +371,16 @@ struct DashboardView: View {
                 .font(.title2)
                 .foregroundStyle(.red)
             VStack(alignment: .leading, spacing: 4) {
-                Text("The previous run stopped safely").font(.headline)
+                Text("Run stopped").font(.headline)
                 Text(store.state.lastError?.message ?? "The last pipeline step did not finish.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
-                Text("\(store.actualDraftedChapters) verified chapters remain on disk.")
+                Text("\(store.actualDraftedChapters) chapters remain on disk")
                     .font(.caption.weight(.medium))
             }
             Spacer()
-            Button("Resume Safely", systemImage: "play.fill") { confirmFullRun = true }
+            Button("Resume writing", systemImage: "play.fill") { confirmFullRun = true }
                 .buttonStyle(.borderedProminent)
                 .disabled(store.runner.isRunning)
         }
@@ -401,14 +388,16 @@ struct DashboardView: View {
         .background(.red.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    private func checklistRow(_ title: String, _ detail: String, done: Bool) -> some View {
+    private func checklistRow(_ title: String, _ detail: String? = nil, done: Bool) -> some View {
         HStack(alignment: .top, spacing: 11) {
             Image(systemName: done ? "checkmark.circle.fill" : "circle")
                 .foregroundStyle(done ? StudioTheme.success : .secondary)
                 .font(.body)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.subheadline.weight(.medium))
-                Text(detail).font(.caption).foregroundStyle(.secondary)
+                if let detail {
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -428,7 +417,7 @@ struct DashboardView: View {
 private struct MetricReadout: View {
     let label: String
     let value: String
-    let detail: String
+    var detail: String? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -441,10 +430,12 @@ private struct MetricReadout: View {
                 .font(.system(.title, design: .serif, weight: .semibold))
                 .monospacedDigit()
                 .contentTransition(reduceMotion ? .identity : .numericText())
-            Text(detail)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
