@@ -233,8 +233,8 @@ struct BookSetupView: View {
     private func compactField(_ title: String, text: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.subheadline.weight(.semibold))
-            TextField(title, text: text)
-                .labelsHidden()
+            TextField("", text: text)
+                .accessibilityLabel(title)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: .infinity)
         }

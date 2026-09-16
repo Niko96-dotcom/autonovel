@@ -223,8 +223,8 @@ struct ProviderSettingsView: View {
         HStack {
             Text(title).font(.subheadline.weight(.medium))
                 .frame(width: 150, alignment: .leading)
-            TextField(title, text: text)
-                .labelsHidden()
+            TextField("", text: text)
+                .accessibilityLabel(title)
                 .textFieldStyle(.roundedBorder)
         }
     }
