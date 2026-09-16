@@ -42,6 +42,10 @@ struct EnvironmentFileStore {
             credentialMode = .none
         }
 
+        if credentialMode == .managedKey {
+            removeLeftoverAPIKeyAssignment()
+        }
+
         return ProviderConfiguration(
             preset: ProviderPreset.infer(apiProtocol: apiProtocol, baseURL: baseURL),
             apiProtocol: apiProtocol,
@@ -117,6 +121,7 @@ struct EnvironmentFileStore {
         switch credentialMode {
         case .managedKey:
             guard let key = resolvedManagedAPIKey() else { return [:] }
+            removeLeftoverAPIKeyAssignment()
             return ["AUTONOVEL_API_KEY": key]
         case .keyFile, .existingEnvironment, .none:
             return [:]
@@ -155,6 +160,14 @@ struct EnvironmentFileStore {
         if FileManager.default.fileExists(atPath: managedKeyURL.path) {
             try FileManager.default.removeItem(at: managedKeyURL)
         }
+    }
+
+    private func removeLeftoverAPIKeyAssignment() {
+        let existing = (try? String(contentsOf: environmentURL, encoding: .utf8)) ?? ""
+        guard Self.values(in: existing).keys.contains("AUTONOVEL_API_KEY") else { return }
+        let updated = Self.updating(existing, with: [:], removing: ["AUTONOVEL_API_KEY"])
+        try? updated.write(to: environmentURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: environmentURL.path)
     }
 
     static func values(in text: String) -> [String: String] {

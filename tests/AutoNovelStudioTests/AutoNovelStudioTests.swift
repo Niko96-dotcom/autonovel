@@ -250,6 +250,33 @@ final class AutoNovelStudioTests: XCTestCase {
         }
     }
 
+    func testOlderEmptyManagedKeyAssignmentIsRemovedWithoutAnotherSave() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-empty-key-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "AUTONOVEL_API_KEY_FILE=\(KeychainSecretStore.sentinel)\nAUTONOVEL_API_KEY=\nFAL_KEY=preserve-me\n".write(
+            to: root.appendingPathComponent(".env"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let secrets = MemorySecretStore()
+        try secrets.write("from-keychain")
+        let store = EnvironmentFileStore(projectURL: root, secretStore: secrets)
+        let loaded = store.load()
+        let extra = store.pipelineEnvironment(credentialMode: .managedKey)
+        let envText = try String(contentsOf: root.appendingPathComponent(".env"), encoding: .utf8)
+        let values = EnvironmentFileStore.values(in: envText)
+
+        XCTAssertEqual(loaded.credentialMode, .managedKey)
+        XCTAssertEqual(extra, ["AUTONOVEL_API_KEY": "from-keychain"])
+        XCTAssertNil(values["AUTONOVEL_API_KEY"])
+        XCTAssertFalse(envText.contains("AUTONOVEL_API_KEY="))
+        XCTAssertEqual(values["FAL_KEY"], "preserve-me")
+        XCTAssertEqual(values["AUTONOVEL_API_KEY_FILE"], KeychainSecretStore.sentinel)
+    }
+
     func testKeychainRoundTripWhenAvailable() throws {
         let store = KeychainSecretStore(
             service: "org.nousresearch.autonovelstudio.tests",
