@@ -28,6 +28,8 @@ final class PipelineRunner {
     private var process: Process?
     private var stdoutPipe: Pipe?
     private var stderrPipe: Pipe?
+    private var stdoutDecoder = UTF8StreamDecoder()
+    private var stderrDecoder = UTF8StreamDecoder()
 
     init(projectURL: URL) {
         self.projectURL = projectURL
@@ -77,12 +79,22 @@ final class PipelineRunner {
         self.process = process
         stdoutPipe = stdout
         stderrPipe = stderr
+        stdoutDecoder = UTF8StreamDecoder()
+        stderrDecoder = UTF8StreamDecoder()
 
-        installReader(for: stdout)
-        installReader(for: stderr)
+        let stdoutDecoder = self.stdoutDecoder
+        let stderrDecoder = self.stderrDecoder
+        installReader(for: stdout, decoder: stdoutDecoder)
+        installReader(for: stderr, decoder: stderrDecoder)
         process.terminationHandler = { [weak self] finished in
+            stdout.fileHandleForReading.readabilityHandler = nil
+            stderr.fileHandleForReading.readabilityHandler = nil
+            let extraStdout = (try? stdout.fileHandleForReading.readToEnd()) ?? Data()
+            let extraStderr = (try? stderr.fileHandleForReading.readToEnd()) ?? Data()
             Task { @MainActor in
                 guard let self else { return }
+                self.append(stdoutDecoder.consume(extraStdout, flush: true))
+                self.append(stderrDecoder.consume(extraStderr, flush: true))
                 self.isRunning = false
                 self.exitCode = finished.terminationStatus
                 if finished.terminationStatus == 0 {
@@ -122,15 +134,18 @@ final class PipelineRunner {
         label = "Ready"
     }
 
-    private func installReader(for pipe: Pipe) {
+    private func installReader(for pipe: Pipe, decoder: UTF8StreamDecoder) {
         pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            guard !data.isEmpty else { return }
+            let text = decoder.consume(data)
+            guard !text.isEmpty else { return }
             Task { @MainActor in self?.append(text) }
         }
     }
 
     private func append(_ text: String) {
+        guard !text.isEmpty else { return }
         output += text
         if output.count > 120_000 {
             output = String(output.suffix(100_000))
@@ -143,6 +158,8 @@ final class PipelineRunner {
         stdoutPipe = nil
         stderrPipe = nil
         process = nil
+        stdoutDecoder = UTF8StreamDecoder()
+        stderrDecoder = UTF8StreamDecoder()
     }
 
     private func resolveUV() -> URL? {
@@ -153,5 +170,70 @@ final class PipelineRunner {
             URL(fileURLWithPath: "/usr/local/bin/uv"),
         ]
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) }
+    }
+
+    /// Decodes UTF-8 from pipe chunks that may split a code point across callbacks.
+    final class UTF8StreamDecoder: @unchecked Sendable {
+        private var leftover: [UInt8] = []
+        private let lock = NSLock()
+
+        func consume(_ data: Data, flush: Bool = false) -> String {
+            lock.lock()
+            defer { lock.unlock() }
+            if !data.isEmpty {
+                leftover.append(contentsOf: data)
+            }
+            guard !leftover.isEmpty else { return "" }
+
+            if flush {
+                let text = String(decoding: leftover, as: UTF8.self)
+                leftover.removeAll(keepingCapacity: true)
+                return text
+            }
+
+            if let text = String(bytes: leftover, encoding: .utf8) {
+                leftover.removeAll(keepingCapacity: true)
+                return text
+            }
+
+            let prefixLength = Self.completePrefixLength(leftover)
+            guard prefixLength > 0 else { return "" }
+            let prefix = leftover.prefix(prefixLength)
+            leftover.removeFirst(prefixLength)
+            return String(bytes: prefix, encoding: .utf8)
+                ?? String(decoding: prefix, as: UTF8.self)
+        }
+
+        private static func completePrefixLength(_ bytes: [UInt8]) -> Int {
+            let count = bytes.count
+            guard count > 0 else { return 0 }
+
+            var idx = count - 1
+            var continuationBytes = 0
+            while idx >= 0, bytes[idx] & 0b1100_0000 == 0b1000_0000 {
+                continuationBytes += 1
+                if continuationBytes == 3 || idx == 0 { break }
+                idx -= 1
+            }
+
+            let lead = bytes[idx]
+            let expectedContinuations: Int
+            if lead & 0b1000_0000 == 0 {
+                expectedContinuations = 0
+            } else if lead & 0b1110_0000 == 0b1100_0000 {
+                expectedContinuations = 1
+            } else if lead & 0b1111_0000 == 0b1110_0000 {
+                expectedContinuations = 2
+            } else if lead & 0b1111_1000 == 0b1111_0000 {
+                expectedContinuations = 3
+            } else {
+                return count
+            }
+
+            if continuationBytes < expectedContinuations {
+                return idx
+            }
+            return count
+        }
     }
 }

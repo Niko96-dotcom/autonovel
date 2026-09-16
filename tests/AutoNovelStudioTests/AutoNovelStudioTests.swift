@@ -9,6 +9,32 @@ final class AutoNovelStudioTests: XCTestCase {
         XCTAssertNil(PipelineRunner.latestModelStatus(in: "Starting pipeline\n"))
     }
 
+    func testLatestModelStatusTracksNewRequestAndIgnoresIncompleteLines_utf8DecoderReassemblesSplitCodepoints() {
+        let flushed = PipelineRunner.UTF8StreamDecoder()
+        XCTAssertEqual(flushed.consume(Data("AUTONOVEL_LOCAL_OK".utf8), flush: true), "AUTONOVEL_LOCAL_OK")
+
+        let cafe = "café"
+        let bytes = Array(cafe.utf8)
+        XCTAssertEqual(bytes.suffix(2), [0xC3, 0xA9])
+        XCTAssertNil(String(bytes: bytes.dropLast(), encoding: .utf8))
+        XCTAssertNil(String(bytes: [bytes.last!], encoding: .utf8))
+
+        let split = PipelineRunner.UTF8StreamDecoder()
+        XCTAssertEqual(split.consume(Data(bytes.dropLast())), "caf")
+        XCTAssertEqual(split.consume(Data([bytes.last!])), "é")
+
+        let joined = PipelineRunner.UTF8StreamDecoder()
+        XCTAssertEqual(
+            joined.consume(Data(bytes.dropLast())) + joined.consume(Data([bytes.last!])),
+            cafe
+        )
+
+        let thumb = Array("👍".utf8)
+        let emoji = PipelineRunner.UTF8StreamDecoder()
+        XCTAssertEqual(emoji.consume(Data(thumb.prefix(2))), "")
+        XCTAssertEqual(emoji.consume(Data(thumb.dropFirst(2))), "👍")
+    }
+
     func testBookBriefCountsOnlyEssentialFields() {
         var brief = BookBrief()
         XCTAssertEqual(brief.requiredCompleted, 0)
