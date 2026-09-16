@@ -7,9 +7,10 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             SidebarView(store: store)
-                .navigationSplitViewColumnWidth(240)
+                .navigationSplitViewColumnWidth(min: 240, ideal: 240, max: 280)
         } detail: {
             detail
+                .id(store.selection)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .windowBackgroundColor))
         }

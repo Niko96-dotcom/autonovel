@@ -4,22 +4,23 @@ struct SidebarView: View {
     @Bindable var store: StudioStore
 
     var body: some View {
-        VStack(spacing: 0) {
-            List(selection: $store.selection) {
-                Section("Start here") {
-                    rows(StudioSection.startHere)
-                }
-                Section("Your book") {
-                    rows(StudioSection.bookFiles)
-                }
-                Section("Advanced") {
-                    rows(StudioSection.advanced)
-                }
+        List(selection: $store.selection) {
+            Section("Start here") {
+                rows(StudioSection.startHere)
             }
-            .listStyle(.sidebar)
-
-            Divider()
-            projectFooter
+            Section("Your book") {
+                rows(StudioSection.bookFiles)
+            }
+            Section("Advanced") {
+                rows(StudioSection.advanced)
+            }
+        }
+        .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                Divider()
+                projectFooter
+            }
         }
         .navigationTitle("Studio")
     }
@@ -59,10 +60,11 @@ struct SidebarView: View {
 
     @ViewBuilder
     private func rows(_ sections: [StudioSection]) -> some View {
-        ForEach(sections) { section in
+        ForEach(sections, id: \.self) { section in
             HStack(spacing: 11) {
                 Image(systemName: section.symbol)
-                    .frame(width: 19)
+                    .symbolRenderingMode(.monochrome)
+                    .frame(width: 19, height: 16, alignment: .center)
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(section.title)
