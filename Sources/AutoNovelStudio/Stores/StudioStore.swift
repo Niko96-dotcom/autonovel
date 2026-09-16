@@ -138,15 +138,16 @@ final class StudioStore {
     }
 
     func saveBookBrief(_ brief: BookBrief) throws {
+        let seedURL = projectURL.appendingPathComponent("seed.txt")
+        let previousGenerated = loadBookBrief().seedText + "\n"
+        let existingSeed = try? String(contentsOf: seedURL, encoding: .utf8)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let data = try encoder.encode(brief)
         try data.write(to: projectURL.appendingPathComponent("book.json"), options: .atomic)
-        try (brief.seedText + "\n").write(
-            to: projectURL.appendingPathComponent("seed.txt"),
-            atomically: true,
-            encoding: .utf8
-        )
+        if existingSeed == nil || existingSeed == previousGenerated {
+            try (brief.seedText + "\n").write(to: seedURL, atomically: true, encoding: .utf8)
+        }
         refresh()
     }
 

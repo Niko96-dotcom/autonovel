@@ -36,6 +36,37 @@ final class AutoNovelStudioTests: XCTestCase {
         XCTAssertTrue(brief.seedText.contains("Not specified — let the pipeline propose options."))
     }
 
+    @MainActor
+    func testSaveBookBriefSkipsOverwriteWhenSeedWasCustomized() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-seed-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = StudioStore(projectURL: root)
+        var brief = BookBrief()
+        brief.title = "The Glass Cartographer"
+        brief.author = "Ada"
+        try store.saveBookBrief(brief)
+
+        let seedURL = root.appendingPathComponent("seed.txt")
+        XCTAssertEqual(try String(contentsOf: seedURL, encoding: .utf8), brief.seedText + "\n")
+
+        brief.author = "Mara"
+        try store.saveBookBrief(brief)
+        XCTAssertEqual(try String(contentsOf: seedURL, encoding: .utf8), brief.seedText + "\n")
+        XCTAssertTrue(try String(contentsOf: seedURL, encoding: .utf8).contains("Author: Mara"))
+
+        let custom = "Polished story seed from DocumentEditorView.\n"
+        try store.saveText(custom, for: .seed)
+
+        brief.author = "Niko"
+        try store.saveBookBrief(brief)
+
+        XCTAssertEqual(try String(contentsOf: seedURL, encoding: .utf8), custom)
+        XCTAssertEqual(store.loadBookBrief().author, "Niko")
+    }
+
     func testPipelineStateDecodesPartialState() throws {
         let json = #"{"phase":"drafting","chapters_drafted":3,"chapters_total":12}"#.data(using: .utf8)!
         let state = try JSONDecoder().decode(PipelineState.self, from: json)
