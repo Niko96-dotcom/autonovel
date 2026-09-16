@@ -40,7 +40,7 @@ struct AdvancedDocumentsView: View {
                                 .padding(.vertical, 7)
                                 .foregroundStyle(selection == document.id ? .white : .primary)
                                 .background(
-                                    selection == document.id ? AnyShapeStyle(StudioTheme.plum) : AnyShapeStyle(.quaternary),
+                                    selection == document.id ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.quaternary),
                                     in: Capsule()
                                 )
                         }

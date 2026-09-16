@@ -5,8 +5,6 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            brandHeader
-
             List(selection: $store.selection) {
                 Section("Start here") {
                     rows(StudioSection.startHere)
@@ -26,33 +24,11 @@ struct SidebarView: View {
         .navigationTitle("Studio")
     }
 
-    private var brandHeader: some View {
-        HStack(spacing: 11) {
-            Image(systemName: "text.book.closed.fill")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(width: 36, height: 36)
-                .background(StudioTheme.accent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            VStack(alignment: .leading, spacing: 1) {
-                Text("AUTONOVEL")
-                    .font(.caption.weight(.bold))
-                    .tracking(1.2)
-                Text("Writing studio")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 13)
-        .padding(.top, 10)
-        .padding(.bottom, 8)
-    }
-
     private var projectFooter: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 8) {
                 Image(systemName: "server.rack")
-                    .foregroundStyle(StudioTheme.accent)
+                    .foregroundStyle(.secondary)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Model provider")
@@ -87,7 +63,7 @@ struct SidebarView: View {
             HStack(spacing: 11) {
                 Image(systemName: section.symbol)
                     .frame(width: 19)
-                    .foregroundStyle(section == .setup ? StudioTheme.accent : .secondary)
+                    .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(section.title)
                         .lineLimit(1)

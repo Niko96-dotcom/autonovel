@@ -20,6 +20,7 @@ struct DocumentEditorView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle(document.title)
+        .focusedValue(\.studioSaveAction, { saveNow() })
         .task(id: document.id) { load() }
         .onChange(of: text) { _, newValue in scheduleSave(newValue) }
         .onDisappear {
@@ -32,9 +33,9 @@ struct DocumentEditorView: View {
         HStack(spacing: 12) {
             Image(systemName: document.symbol)
                 .font(.title3.weight(.semibold))
-                .foregroundStyle(StudioTheme.amber)
+                .foregroundStyle(Color.accentColor)
                 .frame(width: 40, height: 40)
-                .background(StudioTheme.amber.opacity(0.11), in: RoundedRectangle(cornerRadius: 11))
+                .background(Color.accentColor.opacity(0.11), in: RoundedRectangle(cornerRadius: 11))
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
@@ -80,7 +81,6 @@ struct DocumentEditorView: View {
             Button("Save", systemImage: "square.and.arrow.down") { saveNow() }
                 .labelStyle(.iconOnly)
                 .help("Save now")
-                .keyboardShortcut("s", modifiers: .command)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)

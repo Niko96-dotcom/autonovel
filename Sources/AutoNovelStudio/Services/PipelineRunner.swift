@@ -5,7 +5,7 @@ import Observation
 @Observable
 final class PipelineRunner {
     private(set) var isRunning = false
-    private(set) var label = "Idle"
+    private(set) var label = "Ready"
     private(set) var output = ""
     private(set) var exitCode: Int32?
     private(set) var startedAt: Date?
@@ -33,7 +33,22 @@ final class PipelineRunner {
         self.projectURL = projectURL
     }
 
-    func run(label: String, pythonArguments: [String]) {
+    nonisolated static func processEnvironment(
+        base: [String: String],
+        extra: [String: String] = [:]
+    ) -> [String: String] {
+        var environment = base
+        environment["PYTHONUNBUFFERED"] = "1"
+        if extra.keys.contains("AUTONOVEL_API_KEY") {
+            environment.removeValue(forKey: "AUTONOVEL_API_KEY_FILE")
+        }
+        for (key, value) in extra {
+            environment[key] = value
+        }
+        return environment
+    }
+
+    func run(label: String, pythonArguments: [String], extraEnvironment: [String: String] = [:]) {
         guard !isRunning else { return }
         guard let uv = resolveUV() else {
             errorMessage = "Could not find uv. Expected it in ~/.local/bin or Homebrew."
@@ -46,9 +61,10 @@ final class PipelineRunner {
         process.executableURL = uv
         process.arguments = ["run", "python"] + pythonArguments
         process.currentDirectoryURL = projectURL
-        var environment = ProcessInfo.processInfo.environment
-        environment["PYTHONUNBUFFERED"] = "1"
-        process.environment = environment
+        process.environment = Self.processEnvironment(
+            base: ProcessInfo.processInfo.environment,
+            extra: extraEnvironment
+        )
         process.standardOutput = stdout
         process.standardError = stderr
 
@@ -103,7 +119,7 @@ final class PipelineRunner {
         output = ""
         exitCode = nil
         errorMessage = nil
-        label = "Idle"
+        label = "Ready"
     }
 
     private func installReader(for pipe: Pipe) {

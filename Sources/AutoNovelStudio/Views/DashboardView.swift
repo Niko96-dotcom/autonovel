@@ -4,6 +4,7 @@ struct DashboardView: View {
     @Bindable var store: StudioStore
     @State private var confirmFullRun = false
     @State private var appeared = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollView {
@@ -30,7 +31,11 @@ struct DashboardView: View {
         }
         .navigationTitle("Overview")
         .onAppear {
-            withAnimation(.easeOut(duration: 0.45)) { appeared = true }
+            if reduceMotion {
+                appeared = true
+            } else {
+                withAnimation(.easeOut(duration: 0.45)) { appeared = true }
+            }
         }
         .alert("Start writing \(bookTitle)?", isPresented: $confirmFullRun) {
             Button("Cancel", role: .cancel) {}
@@ -56,7 +61,7 @@ struct DashboardView: View {
             HStack(alignment: .bottom, spacing: 30) {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 10) {
-                        SectionEyebrow(text: store.completionIsVerified ? "Manuscript complete" : "In production")
+                        SectionEyebrow(text: store.completionIsVerified ? "Manuscript complete" : "In production", onDark: true)
                         Circle().fill(.white.opacity(0.24)).frame(width: 3, height: 3)
                         Text("Updated \(store.lastRefresh.formatted(date: .omitted, time: .shortened))")
                             .font(.caption)
@@ -85,7 +90,7 @@ struct DashboardView: View {
                     Text(store.overallProgress, format: .percent.precision(.fractionLength(0)))
                         .font(.system(size: 52, weight: .light, design: .serif))
                         .foregroundStyle(.white)
-                        .contentTransition(.numericText())
+                        .contentTransition(reduceMotion ? .identity : .numericText())
                     Text("OVERALL PROGRESS")
                         .font(.caption2.weight(.semibold))
                         .tracking(1.1)
@@ -209,9 +214,9 @@ struct DashboardView: View {
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(index <= currentPhaseIndex ? .white : .secondary)
                                 .frame(width: 27, height: 27)
-                                .background(index <= currentPhaseIndex ? StudioTheme.accent : Color.secondary.opacity(0.10), in: Circle())
+                                .background(index <= currentPhaseIndex ? Color.accentColor : Color.secondary.opacity(0.10), in: Circle())
                             Rectangle()
-                                .fill(index < currentPhaseIndex ? StudioTheme.accent : Color.secondary.opacity(0.13))
+                                .fill(index < currentPhaseIndex ? Color.accentColor : Color.secondary.opacity(0.13))
                                 .frame(height: 1)
                         }
                         Text(phase.title)
@@ -262,7 +267,7 @@ struct DashboardView: View {
                 SectionEyebrow(text: "Model provider")
                 Spacer()
                 Image(systemName: "server.rack")
-                    .foregroundStyle(StudioTheme.accent)
+                    .foregroundStyle(.secondary)
             }
             Text(store.providerConfiguration.writerModel.isEmpty ? "Connect a writing model" : store.providerConfiguration.writerModel)
                 .font(.system(.title2, design: .serif, weight: .semibold))
@@ -281,11 +286,12 @@ struct DashboardView: View {
                     systemImage: store.runner.isRunning ? "waveform" : "checkmark.shield"
                 )
                 .font(.caption)
-                .foregroundStyle(store.runner.isRunning ? StudioTheme.accent : .secondary)
+                .foregroundStyle(store.runner.isRunning ? Color.accentColor : .secondary)
             }
             HStack {
                 Button("Check Connection", systemImage: "bolt.horizontal.circle") { store.runModelCheck() }
                     .buttonStyle(.borderedProminent)
+                    .help("Check Connection")
                     .disabled(store.runner.isRunning)
                 SettingsLink { Label("Configure", systemImage: "slider.horizontal.3") }
             }
@@ -321,7 +327,11 @@ struct DashboardView: View {
                 .background(StudioTheme.ink, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .foregroundStyle(.white.opacity(0.78))
                 .onChange(of: store.runner.output) { _, _ in
-                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("console-end", anchor: .bottom) }
+                    if reduceMotion {
+                        proxy.scrollTo("console-end", anchor: .bottom)
+                    } else {
+                        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("console-end", anchor: .bottom) }
+                    }
                 }
             }
         }
@@ -419,6 +429,7 @@ private struct MetricReadout: View {
     let label: String
     let value: String
     let detail: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -429,7 +440,7 @@ private struct MetricReadout: View {
             Text(value)
                 .font(.system(.title, design: .serif, weight: .semibold))
                 .monospacedDigit()
-                .contentTransition(.numericText())
+                .contentTransition(reduceMotion ? .identity : .numericText())
             Text(detail)
                 .font(.caption)
                 .foregroundStyle(.tertiary)

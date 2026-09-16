@@ -1,34 +1,64 @@
 import SwiftUI
 
+private enum SettingsPane: String, CaseIterable, Identifiable {
+    case provider
+    case about
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .provider: "Provider"
+        case .about: "About"
+        }
+    }
+}
+
 struct ProviderSettingsView: View {
     @Bindable var store: StudioStore
 
     @State private var configuration = ProviderConfiguration()
     @State private var didLoad = false
+    @State private var pane = SettingsPane.provider
     @State private var saveMessage: String?
     @State private var errorMessage: String?
 
     var body: some View {
-        TabView {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    settingsHeader
-                    Divider().padding(.vertical, 20)
-                    providerSection
-                    Divider().padding(.vertical, 20)
-                    modelsSection
-                    Divider().padding(.vertical, 20)
-                    authenticationSection
+        NavigationStack {
+            Group {
+                switch pane {
+                case .provider:
+                    providerScroll
+                case .about:
+                    aboutView
                 }
-                .padding(26)
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) { saveBar }
-            .tabItem { Label("Model Provider", systemImage: "server.rack") }
-
-            aboutView
-                .tabItem { Label("About", systemImage: "info.circle") }
+            .navigationTitle(pane.title)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Picker("Settings pane", selection: $pane) {
+                        ForEach(SettingsPane.allCases) { item in
+                            Text(item.title).tag(item)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(minWidth: 220)
+                }
+                if pane == .provider {
+                    ToolbarItem(placement: .automatic) {
+                        Button("Save") { save() }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save & Check Connection") {
+                            if save() { store.runModelCheck() }
+                        }
+                        .disabled(store.runner.isRunning)
+                    }
+                }
+            }
         }
-        .frame(width: 660, height: 650)
+        .frame(minWidth: 560, idealWidth: 640, minHeight: 540, idealHeight: 720)
+        .focusedValue(\.studioSaveAction, pane == .provider ? { save() } : nil)
         .task {
             store.reloadProviderConfiguration()
             configuration = store.providerConfiguration
@@ -55,13 +85,44 @@ struct ProviderSettingsView: View {
         }
     }
 
+    private var providerScroll: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                settingsHeader
+                statusBanner
+                Divider().padding(.vertical, 20)
+                authenticationSection
+                Divider().padding(.vertical, 20)
+                providerSection
+                Divider().padding(.vertical, 20)
+                modelsSection
+            }
+            .padding(26)
+        }
+    }
+
+    @ViewBuilder
+    private var statusBanner: some View {
+        if let errorMessage {
+            Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+                .font(.caption)
+                .padding(.top, 16)
+        } else if let saveMessage {
+            Label(saveMessage, systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+                .padding(.top, 16)
+        }
+    }
+
     private var settingsHeader: some View {
         HStack(alignment: .top, spacing: 16) {
             Image(systemName: "point.3.filled.connected.trianglepath.dotted")
                 .font(.system(size: 24, weight: .medium))
                 .foregroundStyle(.white)
                 .frame(width: 52, height: 52)
-                .background(StudioTheme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
             VStack(alignment: .leading, spacing: 5) {
                 SectionEyebrow(text: "Intelligence")
@@ -77,7 +138,7 @@ struct ProviderSettingsView: View {
 
     private var providerSection: some View {
         SettingsSection(
-            number: "01",
+            number: "02",
             title: "Provider",
             detail: "Presets fill the endpoint and protocol; every value stays editable."
         ) {
@@ -95,8 +156,12 @@ struct ProviderSettingsView: View {
             }
             .pickerStyle(.menu)
 
-            TextField("https://api.example.com", text: $configuration.baseURL, prompt: Text("API base URL"))
-                .textFieldStyle(.roundedBorder)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("API base URL")
+                    .font(.subheadline.weight(.semibold))
+                TextField("API base URL", text: $configuration.baseURL, prompt: Text("https://api.example.com"))
+                    .textFieldStyle(.roundedBorder)
+            }
 
             Label(configuration.apiProtocol.detail, systemImage: "info.circle")
                 .font(.caption)
@@ -106,7 +171,7 @@ struct ProviderSettingsView: View {
 
     private var modelsSection: some View {
         SettingsSection(
-            number: "02",
+            number: "03",
             title: "Model roles",
             detail: "Use one model everywhere or assign different models to writing, judging, and review."
         ) {
@@ -132,9 +197,9 @@ struct ProviderSettingsView: View {
 
     private var authenticationSection: some View {
         SettingsSection(
-            number: "03",
+            number: "01",
             title: "Authentication",
-            detail: "Secrets never appear in the interface after saving and are excluded from Git."
+            detail: "Secrets never appear in the interface after saving. Managed keys live in the Keychain, not in the project."
         ) {
             Picker("Credential source", selection: $configuration.credentialMode) {
                 ForEach(CredentialMode.allCases) { mode in
@@ -159,7 +224,7 @@ struct ProviderSettingsView: View {
                     text: $configuration.pendingAPIKey
                 )
                 .textFieldStyle(.roundedBorder)
-                Label("Stored in a private 0600 file inside .autonovel/secrets.", systemImage: "lock.fill")
+                Label("Stored in the macOS Keychain for this project. Pipeline runs receive it through the process environment.", systemImage: "lock.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             case .keyFile:
@@ -176,44 +241,11 @@ struct ProviderSettingsView: View {
         }
     }
 
-    private var saveBar: some View {
-        HStack(spacing: 12) {
-            Group {
-                if let errorMessage {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                } else if let saveMessage {
-                    Label(saveMessage, systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(StudioTheme.success)
-                } else {
-                    Text("Settings apply to every pipeline command in this project.")
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .font(.caption)
-            .lineLimit(2)
-
-            Spacer()
-
-            Button("Save") { save() }
-                .keyboardShortcut("s", modifiers: .command)
-            Button("Save & Check Connection", systemImage: "bolt.horizontal.circle") {
-                if save() { store.runModelCheck() }
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(store.runner.isRunning)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(.ultraThickMaterial)
-        .overlay(alignment: .top) { Divider() }
-    }
-
     private var aboutView: some View {
         VStack(spacing: 18) {
             Image(systemName: "books.vertical.fill")
                 .font(.system(size: 42, weight: .light))
-                .foregroundStyle(StudioTheme.accent)
+                .foregroundStyle(Color.accentColor)
             Text("AutoNovel Studio")
                 .font(.system(.largeTitle, design: .serif, weight: .bold))
             Text("An open, local-first writing studio for building, evaluating, revising, and exporting complete novels.")
@@ -274,7 +306,7 @@ private struct SettingsSection<Content: View>: View {
         HStack(alignment: .top, spacing: 18) {
             Text(number)
                 .font(.caption.monospaced().weight(.semibold))
-                .foregroundStyle(StudioTheme.accent)
+                .foregroundStyle(.secondary)
                 .frame(width: 26, alignment: .leading)
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 3) {

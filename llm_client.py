@@ -45,7 +45,7 @@ def api_base_url() -> str:
 
 def _api_key() -> str:
     key_file = os.environ.get("AUTONOVEL_API_KEY_FILE", "").strip()
-    if key_file:
+    if key_file and not key_file.startswith("keychain:"):
         path = Path(key_file).expanduser()
         try:
             key = path.read_text().strip()

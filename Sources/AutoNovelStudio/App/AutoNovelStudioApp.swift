@@ -2,9 +2,29 @@ import AppKit
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var windowObservers: [NSObjectProtocol] = []
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        NSHelpManager.shared.registerBooks(in: Bundle.main)
+        let names: [Notification.Name] = [
+            NSWindow.didBecomeKeyNotification,
+            NSWindow.didExposeNotification,
+        ]
+        for name in names {
+            let observer = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+                StudioWindowHygiene.closePlaceholderWindows()
+            }
+            windowObservers.append(observer)
+        }
+        DispatchQueue.main.async {
+            StudioWindowHygiene.closePlaceholderWindows()
+        }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        StudioWindowHygiene.closePlaceholderWindows()
     }
 }
 
@@ -18,28 +38,20 @@ struct AutoNovelStudioApp: App {
             ContentView(store: store)
                 .frame(minWidth: 900, minHeight: 640)
                 .task { store.startMonitoring() }
-                .tint(StudioTheme.accent)
         }
         .defaultSize(width: 1_000, height: 760)
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
+        .windowResizability(.contentMinSize)
         .commands {
-            CommandMenu("Novel") {
-                Button("Check Local Model") { store.runModelCheck() }
-                    .keyboardShortcut("k", modifiers: [.command, .shift])
-                    .disabled(store.runner.isRunning)
-                Button("Run Current Phase") { store.runCurrentPhase() }
-                    .keyboardShortcut("r", modifiers: [.command, .shift])
-                    .disabled(store.runner.isRunning || !store.seedIsReady)
-                Divider()
-                Button("Stop Current Process") { store.runner.stop() }
-                    .disabled(!store.runner.isRunning)
-            }
+            StudioCommands(store: store)
         }
 
         Settings {
             ProviderSettingsView(store: store)
-                .tint(StudioTheme.accent)
         }
+        .defaultSize(width: 640, height: 720)
+        .windowResizability(.contentMinSize)
     }
 }
+

@@ -4,6 +4,7 @@ struct ChaptersView: View {
     @Bindable var store: StudioStore
     @State private var selectedChapter: Int?
     @State private var searchText = ""
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Group {
@@ -17,6 +18,8 @@ struct ChaptersView: View {
                         .buttonStyle(.borderedProminent)
                     Button("Review Book Setup") { store.selection = .setup }
                 }
+            } else if filteredChapters.isEmpty {
+                ContentUnavailableView.search(text: searchText)
             } else {
                 HSplitView {
                     chapterNavigator
@@ -24,13 +27,14 @@ struct ChaptersView: View {
                     if let chapter = activeChapter {
                         DocumentEditorView(store: store, document: document(for: chapter))
                             .id(chapter.id)
-                            .transition(.opacity.combined(with: .move(edge: .trailing)))
+                            .transition(reduceMotion ? .identity : .opacity.combined(with: .move(edge: .trailing)))
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("Chapters")
+        .searchable(text: $searchText, placement: .toolbar, prompt: "Find a chapter")
         .task(id: store.chapters.map(\.id)) {
             if selectedChapter == nil || !store.chapters.contains(where: { $0.id == selectedChapter }) {
                 selectedChapter = store.chapters.first?.id
@@ -52,16 +56,6 @@ struct ChaptersView: View {
                     Spacer()
                     StatusPill(text: "\(store.actualDraftedChapters)/\(store.targetChapters)", color: StudioTheme.success)
                 }
-
-                HStack(spacing: 7) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("Find a chapter", text: $searchText)
-                        .textFieldStyle(.plain)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(.quaternary.opacity(0.7), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             }
             .padding(16)
 
@@ -135,8 +129,13 @@ struct ChaptersView: View {
         else { return }
         let destination = currentIndex + offset
         guard store.chapters.indices.contains(destination) else { return }
-        withAnimation(.snappy(duration: 0.24)) {
-            self.selectedChapter = store.chapters[destination].id
+        let nextID = store.chapters[destination].id
+        if reduceMotion {
+            self.selectedChapter = nextID
+        } else {
+            withAnimation(.snappy(duration: 0.24)) {
+                self.selectedChapter = nextID
+            }
         }
     }
 }
@@ -148,7 +147,7 @@ private struct ChapterRow: View {
         HStack(alignment: .top, spacing: 11) {
             Text(chapter.numberLabel)
                 .font(.caption.monospaced().weight(.semibold))
-                .foregroundStyle(StudioTheme.accent)
+                .foregroundStyle(.secondary)
                 .frame(width: 24, alignment: .leading)
                 .padding(.top, 2)
 

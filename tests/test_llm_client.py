@@ -115,6 +115,32 @@ class LLMClientTests(unittest.TestCase):
         os.environ,
         {
             "AUTONOVEL_LLM_PROVIDER": "openai",
+            "AUTONOVEL_API_BASE_URL": "https://models.example.org/v1",
+            "AUTONOVEL_API_KEY_FILE": "keychain:org.nousresearch.autonovelstudio",
+            "AUTONOVEL_API_KEY": "from-env",
+        },
+        clear=True,
+    )
+    def test_keychain_sentinel_falls_through_to_api_key(self):
+        self.assertIsNone(llm_client.configuration_error())
+        self.assertEqual(llm_client._api_key(), "from-env")
+
+    @patch.dict(
+        os.environ,
+        {
+            "AUTONOVEL_LLM_PROVIDER": "openai",
+            "AUTONOVEL_API_BASE_URL": "https://models.example.org/v1",
+            "AUTONOVEL_API_KEY_FILE": "keychain:org.nousresearch.autonovelstudio",
+        },
+        clear=True,
+    )
+    def test_keychain_sentinel_without_key_is_not_a_file_read(self):
+        self.assertIn("No LLM API key configured", llm_client.configuration_error())
+
+    @patch.dict(
+        os.environ,
+        {
+            "AUTONOVEL_LLM_PROVIDER": "openai",
             "AUTONOVEL_API_BASE_URL": "http://localhost:8081",
             "AUTONOVEL_API_KEY": "key",
             "AUTONOVEL_CONTEXT_SIZE": "1024",

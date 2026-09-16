@@ -146,12 +146,12 @@ final class AutoNovelStudioTests: XCTestCase {
         XCTAssertTrue(updated.contains("AUTONOVEL_API_BASE_URL=https://models.example.org/v1"))
     }
 
-    func testManagedProviderCredentialIsPrivateAndConfigurationRemainsReadable() throws {
+    func testManagedProviderCredentialLivesInSecretStoreNotProjectFiles() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("autonovel-provider-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        try "FAL_KEY=preserve-me\n".write(
+        try "FAL_KEY=preserve-me\nAUTONOVEL_API_KEY=old-plaintext\n".write(
             to: root.appendingPathComponent(".env"),
             atomically: true,
             encoding: .utf8
@@ -165,18 +165,74 @@ final class AutoNovelStudioTests: XCTestCase {
         configuration.credentialMode = .managedKey
         configuration.pendingAPIKey = "private-test-key"
 
-        let environmentStore = EnvironmentFileStore(projectURL: root)
+        let secrets = MemorySecretStore()
+        let environmentStore = EnvironmentFileStore(projectURL: root, secretStore: secrets)
         let saved = try environmentStore.save(configuration)
-        let values = EnvironmentFileStore.values(
-            in: try String(contentsOf: root.appendingPathComponent(".env"), encoding: .utf8)
-        )
+        let envText = try String(contentsOf: root.appendingPathComponent(".env"), encoding: .utf8)
+        let values = EnvironmentFileStore.values(in: envText)
         let keyURL = root.appendingPathComponent(EnvironmentFileStore.managedKeyPath)
-        let attributes = try FileManager.default.attributesOfItem(atPath: keyURL.path)
 
         XCTAssertTrue(saved.hasManagedAPIKey)
+        XCTAssertEqual(try secrets.read(), "private-test-key")
         XCTAssertEqual(values["FAL_KEY"], "preserve-me")
-        XCTAssertEqual(values["AUTONOVEL_API_KEY_FILE"], EnvironmentFileStore.managedKeyPath)
-        XCTAssertEqual(try String(contentsOf: keyURL, encoding: .utf8), "private-test-key\n")
-        XCTAssertEqual(attributes[.posixPermissions] as? Int, 0o600)
+        XCTAssertEqual(values["AUTONOVEL_API_KEY_FILE"], KeychainSecretStore.sentinel)
+        XCTAssertEqual(values["AUTONOVEL_API_KEY"], "")
+        XCTAssertFalse(envText.contains("private-test-key"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: keyURL.path))
+    }
+
+    func testLegacyManagedKeyFileMigratesIntoSecretStore() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-migrate-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let keyURL = root.appendingPathComponent(EnvironmentFileStore.managedKeyPath)
+        try FileManager.default.createDirectory(
+            at: keyURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try "legacy-file-key\n".write(to: keyURL, atomically: true, encoding: .utf8)
+        try "AUTONOVEL_API_KEY_FILE=\(EnvironmentFileStore.managedKeyPath)\n".write(
+            to: root.appendingPathComponent(".env"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let secrets = MemorySecretStore()
+        let loaded = EnvironmentFileStore(projectURL: root, secretStore: secrets).load()
+
+        XCTAssertEqual(loaded.credentialMode, .managedKey)
+        XCTAssertTrue(loaded.hasManagedAPIKey)
+        XCTAssertEqual(try secrets.read(), "legacy-file-key")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: keyURL.path))
+    }
+
+    func testPipelineEnvironmentInjectsKeyAndDropsKeyFilePointer() {
+        let environment = PipelineRunner.processEnvironment(
+            base: [
+                "PATH": "/usr/bin",
+                "AUTONOVEL_API_KEY_FILE": KeychainSecretStore.sentinel,
+            ],
+            extra: ["AUTONOVEL_API_KEY": "from-keychain"]
+        )
+
+        XCTAssertEqual(environment["AUTONOVEL_API_KEY"], "from-keychain")
+        XCTAssertEqual(environment["PYTHONUNBUFFERED"], "1")
+        XCTAssertNil(environment["AUTONOVEL_API_KEY_FILE"])
+    }
+
+    func testKeychainRoundTripWhenAvailable() throws {
+        let store = KeychainSecretStore(
+            service: "org.nousresearch.autonovelstudio.tests",
+            account: "test-\(UUID().uuidString)"
+        )
+        do {
+            try store.write("round-trip-secret")
+        } catch {
+            throw XCTSkip("Keychain unavailable: \(error)")
+        }
+        defer { try? store.delete() }
+        XCTAssertEqual(try store.read(), "round-trip-secret")
     }
 }

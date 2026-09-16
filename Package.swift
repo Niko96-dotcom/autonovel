@@ -10,7 +10,8 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "AutoNovelStudio",
-            path: "Sources/AutoNovelStudio"
+            path: "Sources/AutoNovelStudio",
+            exclude: ["Resources"]
         ),
         .testTarget(
             name: "AutoNovelStudioTests",

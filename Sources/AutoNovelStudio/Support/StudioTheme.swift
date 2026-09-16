@@ -1,10 +1,10 @@
 import SwiftUI
 
 enum StudioTheme {
+    /// Brand color for large hero surfaces only — not for chrome, buttons, or labels.
     static let accent = Color(red: 0.88, green: 0.24, blue: 0.18)
     static let ink = Color(red: 0.12, green: 0.11, blue: 0.10)
     static let amber = accent
-    static let plum = Color(red: 0.37, green: 0.17, blue: 0.20)
     static let moss = Color(red: 0.22, green: 0.44, blue: 0.31)
     static let success = moss
     static let heroGradient = LinearGradient(
@@ -30,12 +30,13 @@ extension View {
 
 struct SectionEyebrow: View {
     let text: String
+    var onDark = false
 
     var body: some View {
         Text(text.uppercased())
             .font(.caption.weight(.semibold))
             .tracking(1.3)
-            .foregroundStyle(StudioTheme.accent)
+            .foregroundStyle(onDark ? Color.white.opacity(0.72) : Color.secondary)
     }
 }
 
@@ -43,19 +44,20 @@ struct StatusPill: View {
     let text: String
     let color: Color
     var animated = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 7) {
             Circle()
                 .fill(color)
                 .frame(width: 7, height: 7)
-                .shadow(color: animated ? color.opacity(0.8) : .clear, radius: 5)
+                .shadow(color: (animated && !reduceMotion) ? color.opacity(0.8) : .clear, radius: 5)
             Text(text)
                 .font(.caption.weight(.medium))
+                .foregroundStyle(.primary)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(color.opacity(0.12), in: Capsule())
-        .foregroundStyle(color)
+        .background(.quaternary, in: Capsule())
     }
 }

@@ -22,8 +22,35 @@ struct BookSetupView: View {
             .padding(28)
             .frame(maxWidth: 980, alignment: .leading)
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) { saveBar }
         .navigationTitle("New Book Setup")
+        .toolbar {
+            ToolbarItem(placement: .status) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(
+                        brief.requiredCompleted == 5
+                            ? "Your book setup is ready"
+                            : "\(5 - brief.requiredCompleted) essential field\(brief.requiredCompleted == 4 ? "" : "s") left"
+                    )
+                    Text(saveMessage ?? "Your answers save automatically")
+                        .foregroundStyle(.secondary)
+                    if let saveError {
+                        Text(saveError).foregroundStyle(.red)
+                    }
+                }
+                .font(.caption)
+                .frame(maxWidth: 320, alignment: .leading)
+            }
+            ToolbarItem(placement: .automatic) {
+                Button("Save") { _ = save() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save & Continue to Start") {
+                    if save() { store.selection = .overview }
+                }
+                .disabled(brief.requiredCompleted < 5)
+            }
+        }
+        .focusedValue(\.studioSaveAction, { _ = save() })
         .task {
             guard !didLoad else { return }
             let savedBrief = store.loadBookBrief()
@@ -90,12 +117,40 @@ struct BookSetupView: View {
                     compactField("Tense", text: $brief.tense, prompt: "Past or present tense")
                 }
             }
-            HStack(spacing: 24) {
-                Stepper(value: $brief.targetWords, in: 15_000...200_000, step: 5_000) {
-                    Text("Target **\(brief.targetWords.formatted()) words**")
+            HStack(alignment: .top, spacing: 24) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Target length")
+                        .font(.subheadline.weight(.semibold))
+                    HStack(spacing: 8) {
+                        TextField("Words", value: $brief.targetWords, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 110)
+                            .onChange(of: brief.targetWords) { _, newValue in
+                                let clamped = min(200_000, max(15_000, newValue))
+                                if clamped != newValue { brief.targetWords = clamped }
+                            }
+                        Stepper("Target words", value: $brief.targetWords, in: 15_000...200_000, step: 5_000)
+                            .labelsHidden()
+                        Text("words")
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                Stepper(value: $brief.targetChapters, in: 5...80) {
-                    Text("About **\(brief.targetChapters) chapters**")
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Chapters")
+                        .font(.subheadline.weight(.semibold))
+                    HStack(spacing: 8) {
+                        TextField("Chapters", value: $brief.targetChapters, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 72)
+                            .onChange(of: brief.targetChapters) { _, newValue in
+                                let clamped = min(80, max(5, newValue))
+                                if clamped != newValue { brief.targetChapters = clamped }
+                            }
+                        Stepper("Target chapters", value: $brief.targetChapters, in: 5...80)
+                            .labelsHidden()
+                        Text("chapters")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -221,37 +276,6 @@ struct BookSetupView: View {
                 )
             }
         }
-    }
-
-    private var saveBar: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Label(
-                    brief.requiredCompleted == 5 ? "Your book setup is ready" : "\(5 - brief.requiredCompleted) essential field\(brief.requiredCompleted == 4 ? "" : "s") left",
-                    systemImage: brief.requiredCompleted == 5 ? "checkmark.circle.fill" : "circle.dotted"
-                )
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(brief.requiredCompleted == 5 ? StudioTheme.moss : .primary)
-                Text(saveMessage ?? "Your answers save automatically")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if let saveError {
-                    Text(saveError).font(.caption).foregroundStyle(.red)
-                }
-            }
-            Spacer()
-            Button("Save now", systemImage: "square.and.arrow.down") { _ = save() }
-            Button("Save & Continue to Start", systemImage: "arrow.right") {
-                if save() { store.selection = .overview }
-            }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(brief.requiredCompleted < 5)
-        }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 12)
-        .background(.ultraThickMaterial)
-        .overlay(alignment: .top) { Divider() }
     }
 
     private func setupSection<Content: View>(

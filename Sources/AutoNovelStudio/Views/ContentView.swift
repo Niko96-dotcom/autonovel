@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Bindable var store: StudioStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         NavigationSplitView {
@@ -19,20 +20,31 @@ struct ContentView: View {
                     Button("Stop", systemImage: "stop.fill") { store.runner.stop() }
                 } else {
                     StatusPill(
-                        text: store.hasPipelineFailure ? "Needs attention" : "Live",
+                        text: store.hasPipelineFailure ? "Needs attention" : "Ready",
                         color: store.hasPipelineFailure ? .red : StudioTheme.moss
                     )
-                    Button("Check Model", systemImage: "bolt.horizontal.circle") {
+                    Button("Check Connection", systemImage: "bolt.horizontal.circle") {
                         store.runModelCheck()
                     }
+                    .help("Check Connection")
                     .disabled(store.runner.isRunning)
                 }
-
-                SettingsLink {
-                    Label("Model Provider", systemImage: "server.rack")
+            }
+        }
+        .overlay {
+            if store.showHelp {
+                ZStack {
+                    Color.black.opacity(reduceMotion ? 0.18 : 0.28)
+                        .ignoresSafeArea()
+                        .onTapGesture { store.showHelp = false }
+                    StudioHelpView()
+                        .background(Color(nsColor: .windowBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .shadow(color: reduceMotion ? .clear : .black.opacity(0.28), radius: reduceMotion ? 0 : 28, y: reduceMotion ? 0 : 10)
+                        .padding(36)
                 }
-                .labelStyle(.iconOnly)
-                .help("Configure model provider")
+                .accessibilityAddTraits(.isModal)
+                .onExitCommand { store.showHelp = false }
             }
         }
     }

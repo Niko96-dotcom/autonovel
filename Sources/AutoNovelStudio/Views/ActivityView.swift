@@ -36,7 +36,8 @@ struct ActivityView: View {
             if store.runner.isRunning {
                 Button("Stop Process", systemImage: "stop.fill", role: .destructive) { store.runner.stop() }
             } else {
-                Button("Check Local Model", systemImage: "bolt.horizontal.circle") { store.runModelCheck() }
+                Button("Check Connection", systemImage: "bolt.horizontal.circle") { store.runModelCheck() }
+                    .help("Check Connection")
             }
         }
         .studioCard()

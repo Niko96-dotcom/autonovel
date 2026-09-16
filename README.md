@@ -266,10 +266,11 @@ server; custom endpoints remain fully editable. Writer, judge, and whole-book re
 models can be assigned independently, along with the backend context window.
 
 Credentials can come from the existing environment, a key file, or a key entered in
-the app. App-managed keys are stored in `.autonovel/secrets/text-model-api-key` with
-0600 permissions and the secrets directory is ignored by Git. No-auth mode is limited
-to loopback OpenAI-compatible servers. Saving settings updates only AutoNovel's model
-variables and preserves unrelated `.env` entries such as optional art or audiobook keys.
+the app. App-managed keys are stored in the macOS Keychain for that project; `.env`
+records a `keychain:` sentinel rather than the secret, and pipeline runs launched
+from the app receive `AUTONOVEL_API_KEY` in the process environment. No-auth mode is
+limited to loopback OpenAI-compatible servers. Saving settings updates only AutoNovel's
+model variables and preserves unrelated `.env` entries such as optional art or audiobook keys.
 
 ---
 

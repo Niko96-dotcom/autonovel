@@ -47,8 +47,28 @@ fi
 
 /usr/bin/pkill -x "$APP_NAME" 2>/dev/null || true
 /bin/rm -rf "$APP_BUNDLE"
-/bin/mkdir -p "$MACOS_DIR"
+RESOURCES_DIR="$CONTENTS_DIR/Resources"
+/bin/mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 /bin/cp "$ROOT_DIR/.build/debug/$APP_NAME" "$MACOS_DIR/$APP_NAME"
+
+ICON_MASTER="$DIST_DIR/AppIcon-1024.png"
+ICONSET="$DIST_DIR/AppIcon.iconset"
+/usr/bin/python3 "$ROOT_DIR/script/render_app_icon.py" "$ICON_MASTER"
+/bin/rm -rf "$ICONSET"
+/bin/mkdir -p "$ICONSET"
+/usr/bin/sips -z 16 16 "$ICON_MASTER" --out "$ICONSET/icon_16x16.png" >/dev/null
+/usr/bin/sips -z 32 32 "$ICON_MASTER" --out "$ICONSET/icon_16x16@2x.png" >/dev/null
+/usr/bin/sips -z 32 32 "$ICON_MASTER" --out "$ICONSET/icon_32x32.png" >/dev/null
+/usr/bin/sips -z 64 64 "$ICON_MASTER" --out "$ICONSET/icon_32x32@2x.png" >/dev/null
+/usr/bin/sips -z 128 128 "$ICON_MASTER" --out "$ICONSET/icon_128x128.png" >/dev/null
+/usr/bin/sips -z 256 256 "$ICON_MASTER" --out "$ICONSET/icon_128x128@2x.png" >/dev/null
+/usr/bin/sips -z 256 256 "$ICON_MASTER" --out "$ICONSET/icon_256x256.png" >/dev/null
+/usr/bin/sips -z 512 512 "$ICON_MASTER" --out "$ICONSET/icon_256x256@2x.png" >/dev/null
+/usr/bin/sips -z 512 512 "$ICON_MASTER" --out "$ICONSET/icon_512x512.png" >/dev/null
+/usr/bin/sips -z 1024 1024 "$ICON_MASTER" --out "$ICONSET/icon_512x512@2x.png" >/dev/null
+/usr/bin/iconutil -c icns -o "$RESOURCES_DIR/AppIcon.icns" "$ICONSET"
+/bin/rm -rf "$RESOURCES_DIR/AutoNovelStudio.help"
+/bin/cp -R "$ROOT_DIR/Sources/AutoNovelStudio/Resources/AutoNovelStudio.help" "$RESOURCES_DIR/AutoNovelStudio.help"
 
 /bin/cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -59,6 +79,14 @@ fi
   <string>en</string>
   <key>CFBundleExecutable</key>
   <string>$APP_NAME</string>
+  <key>CFBundleHelpBookFolder</key>
+  <string>AutoNovelStudio.help</string>
+  <key>CFBundleHelpBookName</key>
+  <string>AutoNovel Studio Help</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <key>CFBundleIconName</key>
+  <string>AppIcon</string>
   <key>CFBundleIdentifier</key>
   <string>$BUNDLE_ID</string>
   <key>CFBundleInfoDictionaryVersion</key>

@@ -4,11 +4,18 @@ struct EnvironmentFileStore {
     static let managedKeyPath = ".autonovel/secrets/text-model-api-key"
 
     let projectURL: URL
+    let secretStore: any CredentialSecretStore
+
+    init(projectURL: URL, secretStore: (any CredentialSecretStore)? = nil) {
+        self.projectURL = projectURL
+        self.secretStore = secretStore ?? KeychainSecretStore.managedAPIKey(projectURL: projectURL)
+    }
 
     private var environmentURL: URL { projectURL.appendingPathComponent(".env") }
     private var managedKeyURL: URL { projectURL.appendingPathComponent(Self.managedKeyPath) }
 
     func load() -> ProviderConfiguration {
+        migrateLegacyManagedKeyIfNeeded()
         let text = (try? String(contentsOf: environmentURL, encoding: .utf8)) ?? ""
         let values = Self.values(in: text)
         let apiProtocol = ModelAPIProtocol(rawValue: values["AUTONOVEL_LLM_PROVIDER"] ?? "")
@@ -16,14 +23,16 @@ struct EnvironmentFileStore {
         let defaultURL = apiProtocol == .anthropic ? "https://api.anthropic.com" : "https://api.openai.com"
         let baseURL = values["AUTONOVEL_API_BASE_URL"] ?? defaultURL
         let keyFilePath = values["AUTONOVEL_API_KEY_FILE"] ?? ""
-        let managedKeyExists = FileManager.default.fileExists(atPath: managedKeyURL.path)
+        let storedManagedKey = ((try? secretStore.read()) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let managedKeyExists = !storedManagedKey.isEmpty
         let directCredentialKeys = ["AUTONOVEL_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
         let directCredentialExists = directCredentialKeys.contains {
             !(values[$0] ?? ProcessInfo.processInfo.environment[$0] ?? "").isEmpty
         }
 
         let credentialMode: CredentialMode
-        if keyFilePath == Self.managedKeyPath || URL(fileURLWithPath: keyFilePath).standardizedFileURL == managedKeyURL.standardizedFileURL {
+        if isManagedKeyFileValue(keyFilePath) {
             credentialMode = .managedKey
         } else if !keyFilePath.isEmpty {
             credentialMode = .keyFile
@@ -42,7 +51,7 @@ struct EnvironmentFileStore {
             reviewModel: values["AUTONOVEL_REVIEW_MODEL"] ?? values["AUTONOVEL_WRITER_MODEL"] ?? "",
             contextSize: Int(values["AUTONOVEL_CONTEXT_SIZE"] ?? "") ?? (apiProtocol == .anthropic ? 1_000_000 : 32_768),
             credentialMode: credentialMode,
-            keyFilePath: keyFilePath,
+            keyFilePath: isManagedKeyFileValue(keyFilePath) ? KeychainSecretStore.sentinel : keyFilePath,
             pendingAPIKey: "",
             hasManagedAPIKey: managedKeyExists,
             hasEnvironmentCredential: directCredentialExists
@@ -60,16 +69,25 @@ struct EnvironmentFileStore {
             "AUTONOVEL_CONTEXT_SIZE": String(configuration.contextSize),
         ]
 
+        let existing = (try? String(contentsOf: environmentURL, encoding: .utf8)) ?? ""
+        let existingValues = Self.values(in: existing)
+
         switch configuration.credentialMode {
         case .existingEnvironment:
             updates["AUTONOVEL_API_KEY_FILE"] = ""
         case .managedKey:
             let pendingKey = configuration.pendingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
             if !pendingKey.isEmpty {
-                try writeManagedKey(pendingKey)
+                try secretStore.write(pendingKey)
             }
-            updates["AUTONOVEL_API_KEY_FILE"] = Self.managedKeyPath
-            configuration.hasManagedAPIKey = true
+            updates["AUTONOVEL_API_KEY_FILE"] = KeychainSecretStore.sentinel
+            if !(existingValues["AUTONOVEL_API_KEY"] ?? "").isEmpty {
+                updates["AUTONOVEL_API_KEY"] = ""
+            }
+            try removeLegacyManagedKeyFile()
+            configuration.hasManagedAPIKey = !((try secretStore.read()) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
         case .keyFile:
             updates["AUTONOVEL_API_KEY_FILE"] = configuration.keyFilePath.trimmingCharacters(in: .whitespacesAndNewlines)
         case .none:
@@ -77,25 +95,58 @@ struct EnvironmentFileStore {
             updates["AUTONOVEL_API_KEY"] = ""
             updates["ANTHROPIC_API_KEY"] = ""
             updates["OPENAI_API_KEY"] = ""
+            try secretStore.delete()
+            try removeLegacyManagedKeyFile()
+            configuration.hasManagedAPIKey = false
         }
 
-        let existing = (try? String(contentsOf: environmentURL, encoding: .utf8)) ?? ""
         let updated = Self.updating(existing, with: updates)
         try updated.write(to: environmentURL, atomically: true, encoding: .utf8)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: environmentURL.path)
         configuration.pendingAPIKey = ""
+        if configuration.credentialMode == .managedKey {
+            configuration.keyFilePath = KeychainSecretStore.sentinel
+        }
         return configuration
     }
 
-    private func writeManagedKey(_ key: String) throws {
-        let directory = managedKeyURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        try (key + "\n").write(to: managedKeyURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: managedKeyURL.path)
+    func resolvedManagedAPIKey() -> String? {
+        let key = (try? secretStore.read())?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (key?.isEmpty == false) ? key : nil
+    }
+
+    private func isManagedKeyFileValue(_ keyFilePath: String) -> Bool {
+        let trimmed = keyFilePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return false }
+        if trimmed == Self.managedKeyPath { return true }
+        if trimmed == KeychainSecretStore.sentinel { return true }
+        return URL(fileURLWithPath: trimmed).standardizedFileURL == managedKeyURL.standardizedFileURL
+    }
+
+    private func migrateLegacyManagedKeyIfNeeded() {
+        guard FileManager.default.fileExists(atPath: managedKeyURL.path) else { return }
+        let existing = ((try? secretStore.read()) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if existing.isEmpty,
+           let fileKey = try? String(contentsOf: managedKeyURL, encoding: .utf8)
+        {
+            let trimmed = fileKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                do {
+                    try secretStore.write(trimmed)
+                } catch {
+                    return
+                }
+            }
+        }
+        if !((try? secretStore.read()) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            try? FileManager.default.removeItem(at: managedKeyURL)
+        }
+    }
+
+    private func removeLegacyManagedKeyFile() throws {
+        if FileManager.default.fileExists(atPath: managedKeyURL.path) {
+            try FileManager.default.removeItem(at: managedKeyURL)
+        }
     }
 
     static func values(in text: String) -> [String: String] {

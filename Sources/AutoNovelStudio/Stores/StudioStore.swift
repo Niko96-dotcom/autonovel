@@ -9,6 +9,7 @@ final class StudioStore {
     private let environmentStore: EnvironmentFileStore
 
     var selection: StudioSection = .overview
+    var showHelp = false
     private(set) var state = PipelineState()
     private(set) var chapters: [ChapterInfo] = []
     private(set) var activity: [ActivityRecord] = []
@@ -174,22 +175,33 @@ final class StudioStore {
     }
 
     func runModelCheck() {
-        runner.run(label: "Checking the local model", pythonArguments: ["check_llm.py"])
+        runner.run(
+            label: "Checking connection",
+            pythonArguments: ["check_llm.py"],
+            extraEnvironment: pipelineEnvironment()
+        )
     }
 
     func runCurrentPhase() {
         guard currentPhase != .complete else { return }
         runner.run(
             label: "Running \(currentPhase.title)",
-            pythonArguments: ["run_pipeline.py", "--phase", currentPhase.rawValue]
+            pythonArguments: ["run_pipeline.py", "--phase", currentPhase.rawValue],
+            extraEnvironment: pipelineEnvironment()
         )
     }
 
     func runFullPipeline() {
         runner.run(
             label: actualDraftedChapters > 0 ? "Resuming at chapter \(actualDraftedChapters + 1)" : "Building the full novel",
-            pythonArguments: ["run_pipeline.py"]
+            pythonArguments: ["run_pipeline.py"],
+            extraEnvironment: pipelineEnvironment()
         )
+    }
+
+    private func pipelineEnvironment() -> [String: String] {
+        guard let key = environmentStore.resolvedManagedAPIKey() else { return [:] }
+        return ["AUTONOVEL_API_KEY": key]
     }
 
     private func loadChapters() throws -> [ChapterInfo] {
