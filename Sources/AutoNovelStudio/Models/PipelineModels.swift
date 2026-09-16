@@ -124,9 +124,13 @@ struct ActivityRecord: Identifiable, Hashable {
         (score ?? 0) < 0 || ["failed", "error"].contains(resultStatus)
     }
     var isDiscarded: Bool { resultStatus == "discard" }
+    var isForced: Bool {
+        resultStatus == "forced" || (columns.indices.contains(2) && score == nil)
+    }
     var resultSymbol: String {
         if isFailure { return "exclamationmark.triangle.fill" }
         if isDiscarded { return "arrow.counterclockwise.circle" }
+        if isForced { return "exclamationmark.triangle.fill" }
         return "checkmark.circle"
     }
 }
