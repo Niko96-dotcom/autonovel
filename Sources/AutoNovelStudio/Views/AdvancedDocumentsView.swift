@@ -19,15 +19,6 @@ struct AdvancedDocumentsView: View {
 
     private var selector: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Writing rules").font(.headline)
-                    Text("Advanced and reusable. You normally do not need to change these.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(BookDocument.advanced) { document in

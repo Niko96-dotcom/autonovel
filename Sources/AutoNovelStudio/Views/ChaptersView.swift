@@ -12,11 +12,10 @@ struct ChaptersView: View {
                 ContentUnavailableView {
                     Label("No chapters yet", systemImage: "books.vertical")
                 } description: {
-                    Text("Start the novel from Overview. Drafted chapters will appear here automatically as the local model writes them.")
+                    Text("Drafted chapters appear after Overview starts writing")
                 } actions: {
-                    Button("Go to Overview") { store.selection = .overview }
+                    Button("Open Overview") { store.selection = .overview }
                         .buttonStyle(.borderedProminent)
-                    Button("Review Book Setup") { store.selection = .setup }
                 }
             } else if filteredChapters.isEmpty {
                 ContentUnavailableView.search(text: searchText)
@@ -46,13 +45,9 @@ struct ChaptersView: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 11) {
                 HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Manuscript")
-                            .font(.system(.title2, design: .serif, weight: .semibold))
-                        Text("\(store.chapters.count) chapters · \(store.totalWords.formatted()) words")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("\(store.chapters.count) chapters · \(store.totalWords.formatted()) words")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Spacer()
                     StatusPill(text: "\(store.actualDraftedChapters)/\(store.targetChapters)", color: StudioTheme.success)
                 }

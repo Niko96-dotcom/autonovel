@@ -49,10 +49,6 @@ struct DocumentEditorView: View {
                         color: document.role == .required ? StudioTheme.amber : StudioTheme.moss
                     )
                 }
-                Text(document.summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
             }
             .layoutPriority(1)
 
@@ -100,13 +96,13 @@ struct DocumentEditorView: View {
                     .frame(width: proxy.size.width, height: proxy.size.height)
                 if text.isEmpty && loaded {
                     VStack(alignment: .leading, spacing: 7) {
-                        Text("Nothing here yet")
+                        Text(emptyTitle)
                             .font(.headline)
-                        Text(document.role == .generated
-                             ? "Start the novel from Overview to generate this document, or write it here yourself."
-                             : "Start writing here. Changes save automatically.")
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        if document.role == .generated {
+                            Text("Overview generates this, or write it here")
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     .padding(26)
                     .allowsHitTesting(false)
@@ -115,6 +111,13 @@ struct DocumentEditorView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .textBackgroundColor).opacity(document.role == .chapter ? 0.72 : 0.45))
+    }
+
+    private var emptyTitle: String {
+        switch document.role {
+        case .chapter: "No prose yet"
+        default: "No \(document.title.lowercased()) yet"
+        }
     }
 
     private var guidance: some View {

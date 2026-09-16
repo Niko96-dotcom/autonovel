@@ -33,16 +33,6 @@ enum StudioSection: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    var subtitle: String? {
-        switch self {
-        case .overview: "Live progress"
-        case .setup: "Start here"
-        case .chapters: "Drafted prose"
-        case .activity: "What the pipeline is doing"
-        default: nil
-        }
-    }
-
     var symbol: String {
         switch self {
         case .overview: "rectangle.3.group"

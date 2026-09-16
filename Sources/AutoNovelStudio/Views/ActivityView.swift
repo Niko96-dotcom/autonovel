@@ -24,17 +24,16 @@ struct ActivityView: View {
             Image(systemName: store.runner.isRunning ? "waveform.circle.fill" : (store.hasPipelineFailure ? "exclamationmark.triangle.fill" : "clock.arrow.circlepath"))
                 .font(.system(size: 34))
                 .foregroundStyle(store.runner.isRunning ? StudioTheme.amber : (store.hasPipelineFailure ? .red : StudioTheme.moss))
-            VStack(alignment: .leading, spacing: 4) {
-                SectionEyebrow(text: "Live monitor")
-                Text(store.phaseDescription)
-                    .font(.title2.weight(.semibold))
-                Text("Project files checked every second · Last refresh \(store.lastRefresh.formatted(date: .omitted, time: .standard))")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(store.phaseDescription)
+                        .font(.title2.weight(.semibold))
+                    Text("Last refresh \(store.lastRefresh.formatted(date: .omitted, time: .standard))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
             if store.runner.isRunning {
-                Button("Stop Process", systemImage: "stop.fill", role: .destructive) { store.runner.stop() }
+                Button("Stop process", systemImage: "stop.fill", role: .destructive) { store.runner.stop() }
             } else {
                 Button("Check Connection", systemImage: "bolt.horizontal.circle") { store.runModelCheck() }
                     .help("Check Connection")
@@ -46,14 +45,14 @@ struct ActivityView: View {
     private var savedAttempts: some View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("Drafts are kept, even when a check rejects them")
+                Text("Saved attempts")
                     .font(.headline)
-                Text("Open an attempt folder for its draft, partial text, score, and feedback. Only accepted drafts appear in Chapters. Older runs may not have saved attempts.")
+                Text("Includes rejected drafts")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Open Saved Attempts", systemImage: "folder") {
+            Button("Open attempts", systemImage: "folder") {
                 NSWorkspace.shared.open(store.projectURL.appendingPathComponent("draft_attempts"))
             }
             .disabled(!FileManager.default.fileExists(atPath: store.projectURL.appendingPathComponent("draft_attempts").path))
@@ -109,9 +108,9 @@ struct ActivityView: View {
             SectionEyebrow(text: "Evaluation history")
             if store.activity.isEmpty {
                 ContentUnavailableView(
-                    "No recorded evaluations",
+                    "No evaluations yet",
                     systemImage: "list.bullet.clipboard",
-                    description: Text("Kept and discarded attempts will be read from results.tsv.")
+                    description: Text("Written to results.tsv when the pipeline scores a draft")
                 )
                 .frame(minHeight: 120)
             } else {
@@ -146,7 +145,7 @@ struct ActivityView: View {
                     .disabled(store.runner.isRunning || store.runner.output.isEmpty)
             }
             if store.runner.output.isEmpty {
-                Text("Run a model check or pipeline phase to see its stdout and errors here in real time.")
+                Text("No process output yet")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 90, alignment: .center)

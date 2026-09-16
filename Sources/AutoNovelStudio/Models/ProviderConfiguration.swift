@@ -15,8 +15,8 @@ enum ModelAPIProtocol: String, CaseIterable, Identifiable {
 
     var detail: String {
         switch self {
-        case .openAICompatible: "Works with OpenAI, llama.cpp, Ollama, LM Studio, vLLM, and compatible gateways."
-        case .anthropic: "Uses Anthropic's native Messages API."
+        case .openAICompatible: "Works with OpenAI, llama.cpp, Ollama, LM Studio, vLLM, and compatible gateways"
+        case .anthropic: "Anthropic Messages API"
         }
     }
 }

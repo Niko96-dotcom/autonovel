@@ -2,7 +2,7 @@ import SwiftUI
 
 struct LabeledEditor: View {
     let title: String
-    let prompt: String
+    var prompt: String = ""
     @Binding var text: String
     var minHeight: CGFloat = 92
 
@@ -16,7 +16,7 @@ struct LabeledEditor: View {
                     .scrollContentBackground(.hidden)
                     .padding(7)
                     .frame(minHeight: minHeight)
-                if text.isEmpty {
+                if text.isEmpty, !prompt.isEmpty {
                     Text(prompt)
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 12)
