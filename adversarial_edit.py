@@ -9,10 +9,9 @@ Usage: python adversarial_edit.py 1        # single chapter
 import os
 import sys
 import json
-import re
 from pathlib import Path
 from dotenv import load_dotenv
-from llm_client import call_llm
+from llm_client import call_llm, parse_json_response
 
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env")
@@ -36,47 +35,6 @@ def call_judge(prompt, max_tokens=8000):
         ),
         timeout=300,
     )
-
-def parse_json(text):
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r'^```\w*\n?', '', text)
-        text = re.sub(r'\n?```$', '', text)
-    start = text.find('{')
-    if start == -1:
-        start = text.find('[')
-    if start == -1:
-        raise ValueError("No JSON found")
-    # Try direct parse first
-    try:
-        return json.loads(text[start:], strict=False)
-    except json.JSONDecodeError:
-        # Find matching brace
-        depth = 0
-        in_string = False
-        escape = False
-        open_char = text[start]
-        close_char = '}' if open_char == '{' else ']'
-        for i in range(start, len(text)):
-            c = text[i]
-            if escape:
-                escape = False
-                continue
-            if c == '\\' and in_string:
-                escape = True
-                continue
-            if c == '"' and not escape:
-                in_string = not in_string
-                continue
-            if in_string:
-                continue
-            if c == open_char:
-                depth += 1
-            elif c == close_char:
-                depth -= 1
-                if depth == 0:
-                    return json.loads(text[start:i+1], strict=False)
-        return json.loads(text[start:], strict=False)
 
 EDIT_PROMPT = """You are editing a fantasy novel chapter. Your job: identify exactly
 what to cut or rewrite to make this chapter tighter, sharper, more alive.
@@ -128,7 +86,7 @@ def edit_chapter(ch_num):
     
     prompt = EDIT_PROMPT.format(chapter_text=text, word_count=word_count)
     raw = call_judge(prompt)
-    result = parse_json(raw)
+    result = parse_json_response(raw)
     
     # Save log
     log_path = EDIT_LOG_DIR / f"ch{ch_num:02d}_cuts.json"

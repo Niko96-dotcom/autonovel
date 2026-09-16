@@ -27,7 +27,7 @@ BASE_DIR = Path(__file__).parent
 
 # Load .env file if present
 from dotenv import load_dotenv
-from llm_client import call_llm
+from llm_client import call_llm, parse_json_response
 load_dotenv(BASE_DIR / ".env")
 
 # Judge uses Opus 4.6 (harsh, critical). Writer uses Sonnet 4.6 (fast, long context).
@@ -283,48 +283,6 @@ def call_judge(prompt, max_tokens=2000):
         ),
         timeout=180,
     )
-
-
-def parse_json_response(text):
-    """Extract JSON from a response that might have markdown fences or trailing text."""
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r'^```\w*\n?', '', text)
-        text = re.sub(r'\n?```$', '', text)
-    # Find the outermost JSON object
-    start = text.find('{')
-    if start == -1:
-        raise ValueError("No JSON object found in response")
-    # Walk forward to find the matching closing brace
-    depth = 0
-    in_string = False
-    escape = False
-    for i in range(start, len(text)):
-        c = text[i]
-        if escape:
-            escape = False
-            continue
-        if c == '\\' and in_string:
-            escape = True
-            continue
-        if c == '"' and not escape:
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if c == '{':
-            depth += 1
-        elif c == '}':
-            depth -= 1
-            if depth == 0:
-                return json.loads(text[start:i+1], strict=False)
-    # Fallback: try loading as-is, with strict=False to handle control chars
-    try:
-        return json.loads(text, strict=False)
-    except json.JSONDecodeError:
-        # Last resort: fix common issues (literal newlines in strings)
-        fixed = re.sub(r'(?<!\\)\n', '\\n', text)
-        return json.loads(fixed, strict=False)
 
 
 # --- Foundation Evaluation ---

@@ -7,8 +7,10 @@ Ollama, LM Studio, vLLM, and other OpenAI-compatible servers.
 
 from __future__ import annotations
 
+import json
 import math
 import os
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -75,7 +77,7 @@ def configuration_error() -> str | None:
 
     if not base_url:
         return "AUTONOVEL_API_BASE_URL is empty"
-    if not key and not _is_local_openai_backend():
+    if not key and not is_local_openai_backend():
         return (
             "No LLM API key configured. Set AUTONOVEL_API_KEY, "
             "AUTONOVEL_API_KEY_FILE, or "
@@ -85,12 +87,20 @@ def configuration_error() -> str | None:
     return None
 
 
-def _is_local_openai_backend() -> bool:
+def is_local_openai_backend() -> bool:
     """Return whether the current backend is a loopback OpenAI-compatible server."""
     return (
         provider() == "openai"
         and urlparse(api_base_url()).hostname in _LOCAL_HOSTS
     )
+
+
+def pipeline_timeouts() -> tuple[int, int]:
+    """Return (tool, batch) subprocess timeouts for pipeline orchestration."""
+    local = is_local_openai_backend()
+    tool = int(os.environ.get("AUTONOVEL_TOOL_TIMEOUT", "1800" if local else "600"))
+    batch = int(os.environ.get("AUTONOVEL_BATCH_TIMEOUT", "21600" if local else "1800"))
+    return tool, batch
 
 
 def context_window() -> int:
@@ -116,6 +126,49 @@ def prompt_fits_context(prompt: str, *, system: str = "", max_tokens: int = 0) -
     return used <= context_window()
 
 
+def parse_json_response(text: str):
+    """Extract JSON from a response that might have markdown fences or trailing text."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r'^```\w*\n?', '', text)
+        text = re.sub(r'\n?```$', '', text)
+    obj_start = text.find('{')
+    arr_start = text.find('[')
+    candidates = [index for index in (obj_start, arr_start) if index != -1]
+    if not candidates:
+        raise ValueError("No JSON object found in response")
+    start = min(candidates)
+    depth = 0
+    in_string = False
+    escape = False
+    open_char = text[start]
+    close_char = '}' if open_char == '{' else ']'
+    for i in range(start, len(text)):
+        c = text[i]
+        if escape:
+            escape = False
+            continue
+        if c == '\\' and in_string:
+            escape = True
+            continue
+        if c == '"' and not escape:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if c == open_char:
+            depth += 1
+        elif c == close_char:
+            depth -= 1
+            if depth == 0:
+                return json.loads(text[start:i+1], strict=False)
+    try:
+        return json.loads(text, strict=False)
+    except json.JSONDecodeError:
+        fixed = re.sub(r'(?<!\\)\n', '\\n', text)
+        return json.loads(fixed, strict=False)
+
+
 def _endpoint(path: str) -> str:
     base = api_base_url()
     if base.endswith("/v1"):
@@ -131,7 +184,7 @@ def _timeout(requested: float) -> float:
         except ValueError as exc:
             raise LLMConfigurationError("AUTONOVEL_REQUEST_TIMEOUT must be numeric") from exc
 
-    if _is_local_openai_backend():
+    if is_local_openai_backend():
         return max(requested, 1_800.0)
     return requested
 

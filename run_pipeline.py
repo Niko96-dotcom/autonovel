@@ -17,7 +17,6 @@ Usage:
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -25,6 +24,8 @@ from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 from book_config import target_chapters as configured_target_chapters
+from llm_client import pipeline_timeouts
+from review import should_stop
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -33,13 +34,7 @@ from book_config import target_chapters as configured_target_chapters
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env", override=True)
 
-_LOCAL_BACKEND = os.environ.get("AUTONOVEL_LLM_PROVIDER", "anthropic") == "openai"
-MODEL_TOOL_TIMEOUT = int(os.environ.get(
-    "AUTONOVEL_TOOL_TIMEOUT", "1800" if _LOCAL_BACKEND else "600"
-))
-MODEL_BATCH_TIMEOUT = int(os.environ.get(
-    "AUTONOVEL_BATCH_TIMEOUT", "21600" if _LOCAL_BACKEND else "1800"
-))
+MODEL_TOOL_TIMEOUT, MODEL_BATCH_TIMEOUT = pipeline_timeouts()
 STATE_FILE = BASE_DIR / "state.json"
 RESULTS_FILE = BASE_DIR / "results.tsv"
 CHAPTERS_DIR = BASE_DIR / "chapters"
@@ -169,9 +164,29 @@ def run_generation(script: str, timeout: int) -> None:
 # Helpers: git operations
 # ---------------------------------------------------------------------------
 
+NOVEL_ARTIFACT_PATHS = (
+    "seed.txt",
+    "voice.md",
+    "world.md",
+    "characters.md",
+    "outline.md",
+    "canon.md",
+    "MYSTERY.md",
+    "arc_summary.md",
+    "manuscript.md",
+    "reviews.md",
+    "state.json",
+    "results.tsv",
+    "chapters",
+    "typeset",
+)
+
+
 def git_add_commit(message: str) -> str:
-    """Stage all changes and commit. Returns short hash or empty string."""
-    run_tool("git add -A")
+    """Stage novel artifacts and commit. Returns short hash or empty string."""
+    existing = [path for path in NOVEL_ARTIFACT_PATHS if (BASE_DIR / path).exists()]
+    if existing:
+        run_tool("git add -- " + " ".join(existing))
     result = run_tool(f'git commit -m "{message}" --allow-empty')
     if result.returncode == 0:
         hash_result = run_tool("git rev-parse --short HEAD")
@@ -419,6 +434,11 @@ def run_drafting(state: dict) -> dict:
 # PHASE 3 — REVISION
 # ---------------------------------------------------------------------------
 
+def discard_stale_arc_summary() -> None:
+    """Remove leftover arc_summary.md so a prior book cannot leak into a new run."""
+    (BASE_DIR / "arc_summary.md").unlink(missing_ok=True)
+
+
 def parse_panel_consensus(panel_path: Path) -> list[dict]:
     """
     Parse reader_panel.json to find chapters with consensus issues.
@@ -426,7 +446,9 @@ def parse_panel_consensus(panel_path: Path) -> list[dict]:
     sorted by number of readers who flagged (descending).
     """
     if not panel_path.exists():
-        return []
+        raise RuntimeError(
+            f"{panel_path} is missing; reader panel did not produce consensus output"
+        )
     with open(panel_path) as f:
         data = json.load(f)
 
@@ -512,9 +534,12 @@ def run_revision(state: dict, max_cycles: int = MAX_REVISION_CYCLES) -> dict:
         else:
             step("apply_cuts.py not found, skipping mechanical cuts")
 
-        # -- Step 3: Reader panel --
+        # -- Step 3: Rebuild arc summary, then reader panel --
+        step("Building arc summary for reader panel...")
+        run_generation("build_arc_summary.py", timeout=MODEL_BATCH_TIMEOUT)
+
         step("Running reader panel evaluation...")
-        uv_run("reader_panel.py", timeout=MODEL_BATCH_TIMEOUT)
+        run_generation("reader_panel.py", timeout=MODEL_BATCH_TIMEOUT)
 
         # -- Step 4: Parse panel consensus --
         panel_path = EDIT_LOGS_DIR / "reader_panel.json"
@@ -588,7 +613,7 @@ def run_revision(state: dict, max_cycles: int = MAX_REVISION_CYCLES) -> dict:
                            f"Cycle {cycle}: {question} improved {pre_score}->{post_score}")
             else:
                 step(f"Revision made it worse ({post_score} < {pre_score}), reverting")
-                git_reset_hard("HEAD")
+                run_tool(f"git checkout -- chapters/ch_{ch_num:02d}.md 2>/dev/null || true")
                 log_result("reverted", f"rev-ch{ch_num:02d}", post_score,
                            word_count, "discard",
                            f"Cycle {cycle}: {question} regressed {pre_score}->{post_score}")
@@ -656,16 +681,13 @@ def run_revision(state: dict, max_cycles: int = MAX_REVISION_CYCLES) -> dict:
                 total_items = review_data.get("total_items", 0)
                 major_items = review_data.get("major_items", 0)
                 qualified = review_data.get("qualified_items", 0)
-                
+
                 step(f"Stars: {stars}, Items: {total_items} "
                      f"({major_items} major, {qualified} qualified)")
-                
-                # Stop if: ≥4★, no major unqualified items, or >half qualified
-                if stars >= 4.5 and major_items == 0:
-                    step("★★★★½ with no major items — novel is ready.")
-                    break
-                if stars >= 4 and total_items > 0 and qualified / total_items > 0.5:
-                    step(f"★{'★' * int(stars)} with majority qualified items — novel is ready.")
+
+                stop, reason = should_stop(review_data)
+                if stop:
+                    step(f"{reason} — novel is ready.")
                     break
             
             # Step 4: Generate briefs from review items and fix
@@ -805,6 +827,7 @@ def run_pipeline(args):
             sys.exit(1)
         state = default_state()
         save_state(state)
+        discard_stale_arc_summary()
     else:
         state = load_state()
 

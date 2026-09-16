@@ -1,6 +1,6 @@
 import unittest
 
-from review import parse_review
+from review import parse_review, should_stop
 
 
 class ReviewParsingTests(unittest.TestCase):
@@ -25,6 +25,25 @@ Suggestion: Cut the repeated description.
     def test_symbol_rating_still_parses(self):
         parsed = parse_review("★★★★½\n\nProfessor Review\n1. Small issue\nMinor.")
         self.assertEqual(parsed["stars"], 4.5)
+
+    def test_should_stop_when_total_items_at_most_two(self):
+        stop, reason = should_stop({
+            "stars": 3.0,
+            "total_items": 2,
+            "major_items": 2,
+            "qualified_items": 0,
+        })
+        self.assertTrue(stop)
+        self.assertIn("Only 2 items", reason)
+
+    def test_should_continue_when_many_unqualified_items(self):
+        stop, _reason = should_stop({
+            "stars": 3.0,
+            "total_items": 5,
+            "major_items": 3,
+            "qualified_items": 1,
+        })
+        self.assertFalse(stop)
 
 
 if __name__ == "__main__":

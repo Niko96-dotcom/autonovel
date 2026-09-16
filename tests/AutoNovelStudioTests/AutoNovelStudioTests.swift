@@ -176,7 +176,7 @@ final class AutoNovelStudioTests: XCTestCase {
         XCTAssertEqual(try secrets.read(), "private-test-key")
         XCTAssertEqual(values["FAL_KEY"], "preserve-me")
         XCTAssertEqual(values["AUTONOVEL_API_KEY_FILE"], KeychainSecretStore.sentinel)
-        XCTAssertEqual(values["AUTONOVEL_API_KEY"], "")
+        XCTAssertNil(values["AUTONOVEL_API_KEY"])
         XCTAssertFalse(envText.contains("private-test-key"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: keyURL.path))
     }
@@ -220,6 +220,34 @@ final class AutoNovelStudioTests: XCTestCase {
         XCTAssertEqual(environment["AUTONOVEL_API_KEY"], "from-keychain")
         XCTAssertEqual(environment["PYTHONUNBUFFERED"], "1")
         XCTAssertNil(environment["AUTONOVEL_API_KEY_FILE"])
+    }
+
+    func testPipelineEnvironmentDoesNotInjectLeftoverKeychainSecretOutsideManagedKey() throws {
+        let secrets = MemorySecretStore()
+        try secrets.write("leftover-keychain-secret")
+        let store = EnvironmentFileStore(
+            projectURL: FileManager.default.temporaryDirectory,
+            secretStore: secrets
+        )
+
+        XCTAssertEqual(
+            store.pipelineEnvironment(credentialMode: .managedKey),
+            ["AUTONOVEL_API_KEY": "leftover-keychain-secret"]
+        )
+
+        for mode in CredentialMode.allCases where mode != .managedKey {
+            let extra = store.pipelineEnvironment(credentialMode: mode)
+            XCTAssertTrue(extra.isEmpty, "Unexpected extra environment for \(mode.rawValue)")
+            let environment = PipelineRunner.processEnvironment(
+                base: [
+                    "PATH": "/usr/bin",
+                    "AUTONOVEL_API_KEY_FILE": "/tmp/user.key",
+                ],
+                extra: extra
+            )
+            XCTAssertEqual(environment["AUTONOVEL_API_KEY_FILE"], "/tmp/user.key")
+            XCTAssertNil(environment["AUTONOVEL_API_KEY"])
+        }
     }
 
     func testKeychainRoundTripWhenAvailable() throws {

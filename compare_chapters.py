@@ -10,12 +10,11 @@ Usage: python compare_chapters.py          # full tournament
 import os
 import sys
 import json
-import re
 import random
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
-from llm_client import call_llm
+from llm_client import call_llm, parse_json_response
 
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env")
@@ -37,33 +36,6 @@ def call_judge(prompt, max_tokens=4000):
         ),
         timeout=300,
     )
-
-def parse_json(text):
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r'^```\w*\n?', '', text)
-        text = re.sub(r'\n?```$', '', text)
-    start = text.find('{')
-    if start == -1:
-        raise ValueError("No JSON found")
-    try:
-        return json.loads(text[start:], strict=False)
-    except json.JSONDecodeError:
-        depth = 0
-        in_string = False
-        escape = False
-        for i in range(start, len(text)):
-            c = text[i]
-            if escape: escape = False; continue
-            if c == '\\' and in_string: escape = True; continue
-            if c == '"' and not escape: in_string = not in_string; continue
-            if in_string: continue
-            if c == '{': depth += 1
-            elif c == '}':
-                depth -= 1
-                if depth == 0:
-                    return json.loads(text[start:i+1], strict=False)
-        return json.loads(text[start:], strict=False)
 
 COMPARE_PROMPT = """Compare these two chapters from the same fantasy novel.
 Both are first drafts. Pick the BETTER one. You MUST pick a winner -- no ties.
@@ -114,7 +86,7 @@ def compare(ch_a, ch_b):
         text_a=text_a, text_b=text_b
     )
     raw = call_judge(prompt)
-    result = parse_json(raw)
+    result = parse_json_response(raw)
     result["ch_a"] = ch_a
     result["ch_b"] = ch_b
     return result

@@ -70,7 +70,7 @@ struct EnvironmentFileStore {
         ]
 
         let existing = (try? String(contentsOf: environmentURL, encoding: .utf8)) ?? ""
-        let existingValues = Self.values(in: existing)
+        var keysToRemove = Set<String>()
 
         switch configuration.credentialMode {
         case .existingEnvironment:
@@ -81,9 +81,7 @@ struct EnvironmentFileStore {
                 try secretStore.write(pendingKey)
             }
             updates["AUTONOVEL_API_KEY_FILE"] = KeychainSecretStore.sentinel
-            if !(existingValues["AUTONOVEL_API_KEY"] ?? "").isEmpty {
-                updates["AUTONOVEL_API_KEY"] = ""
-            }
+            keysToRemove.insert("AUTONOVEL_API_KEY")
             try removeLegacyManagedKeyFile()
             configuration.hasManagedAPIKey = !((try secretStore.read()) ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -100,7 +98,7 @@ struct EnvironmentFileStore {
             configuration.hasManagedAPIKey = false
         }
 
-        let updated = Self.updating(existing, with: updates)
+        let updated = Self.updating(existing, with: updates, removing: keysToRemove)
         try updated.write(to: environmentURL, atomically: true, encoding: .utf8)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: environmentURL.path)
         configuration.pendingAPIKey = ""
@@ -113,6 +111,16 @@ struct EnvironmentFileStore {
     func resolvedManagedAPIKey() -> String? {
         let key = (try? secretStore.read())?.trimmingCharacters(in: .whitespacesAndNewlines)
         return (key?.isEmpty == false) ? key : nil
+    }
+
+    func pipelineEnvironment(credentialMode: CredentialMode) -> [String: String] {
+        switch credentialMode {
+        case .managedKey:
+            guard let key = resolvedManagedAPIKey() else { return [:] }
+            return ["AUTONOVEL_API_KEY": key]
+        case .keyFile, .existingEnvironment, .none:
+            return [:]
+        }
     }
 
     private func isManagedKeyFileValue(_ keyFilePath: String) -> Bool {
@@ -166,20 +174,27 @@ struct EnvironmentFileStore {
         return values
     }
 
-    static func updating(_ text: String, with updates: [String: String]) -> String {
+    static func updating(
+        _ text: String,
+        with updates: [String: String],
+        removing keysToRemove: Set<String> = []
+    ) -> String {
         var seen = Set<String>()
         var lines: [String] = []
         for line in text.components(separatedBy: .newlines) {
-            guard let key = assignmentKey(in: line), let value = updates[key] else {
-                lines.append(line)
-                continue
+            if let key = assignmentKey(in: line) {
+                if keysToRemove.contains(key) { continue }
+                if let value = updates[key] {
+                    guard !seen.contains(key) else { continue }
+                    lines.append("\(key)=\(dotenvValue(value))")
+                    seen.insert(key)
+                    continue
+                }
             }
-            guard !seen.contains(key) else { continue }
-            lines.append("\(key)=\(dotenvValue(value))")
-            seen.insert(key)
+            lines.append(line)
         }
 
-        let missing = updates.keys.sorted().filter { !seen.contains($0) }
+        let missing = updates.keys.sorted().filter { !seen.contains($0) && !keysToRemove.contains($0) }
         if !missing.isEmpty {
             while lines.last?.isEmpty == true { lines.removeLast() }
             if !lines.isEmpty { lines.append("") }

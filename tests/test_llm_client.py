@@ -151,6 +151,56 @@ class LLMClientTests(unittest.TestCase):
         with self.assertRaises(llm_client.LLMConfigurationError):
             llm_client.call_llm("x" * 10_000, model="local")
 
+    @patch.dict(
+        os.environ,
+        {"AUTONOVEL_API_BASE_URL": "http://127.0.0.1:8081/v1"},
+        clear=True,
+    )
+    def test_loopback_url_without_provider_uses_local_pipeline_timeouts(self):
+        self.assertTrue(llm_client.is_local_openai_backend())
+        self.assertEqual(llm_client.pipeline_timeouts(), (1800, 21600))
+
+    @patch.dict(
+        os.environ,
+        {
+            "AUTONOVEL_API_BASE_URL": "http://localhost:8081/v1",
+            "AUTONOVEL_TOOL_TIMEOUT": "90",
+            "AUTONOVEL_BATCH_TIMEOUT": "120",
+        },
+        clear=True,
+    )
+    def test_explicit_pipeline_timeouts_override_local_defaults(self):
+        self.assertTrue(llm_client.is_local_openai_backend())
+        self.assertEqual(llm_client.pipeline_timeouts(), (90, 120))
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_default_anthropic_keeps_short_pipeline_timeouts(self):
+        self.assertFalse(llm_client.is_local_openai_backend())
+        self.assertEqual(llm_client.pipeline_timeouts(), (600, 1800))
+
+
+class ParseJSONResponseTests(unittest.TestCase):
+    def test_fenced_object_with_trailing_prose(self):
+        raw = '```json\n{"score": 8, "note": "ok"}\n```\nThanks.'
+        self.assertEqual(
+            llm_client.parse_json_response(raw),
+            {"score": 8, "note": "ok"},
+        )
+
+    def test_literal_newlines_inside_strings(self):
+        raw = '{"score": 8, "note": "line1\nline2"}'
+        self.assertEqual(
+            llm_client.parse_json_response(raw),
+            {"score": 8, "note": "line1\nline2"},
+        )
+
+    def test_array_payloads_parse(self):
+        raw = 'Cuts:\n[{"quote": "cut this sentence now", "type": "FAT"}]\nend'
+        self.assertEqual(
+            llm_client.parse_json_response(raw),
+            [{"quote": "cut this sentence now", "type": "FAT"}],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

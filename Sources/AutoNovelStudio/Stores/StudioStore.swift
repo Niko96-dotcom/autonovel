@@ -200,8 +200,7 @@ final class StudioStore {
     }
 
     private func pipelineEnvironment() -> [String: String] {
-        guard let key = environmentStore.resolvedManagedAPIKey() else { return [:] }
-        return ["AUTONOVEL_API_KEY": key]
+        environmentStore.pipelineEnvironment(credentialMode: providerConfiguration.credentialMode)
     }
 
     private func loadChapters() throws -> [ChapterInfo] {
