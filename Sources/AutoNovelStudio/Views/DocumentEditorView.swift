@@ -33,6 +33,7 @@ struct DocumentEditorView: View {
         HStack(spacing: 12) {
             Image(systemName: document.symbol)
                 .font(.title3.weight(.semibold))
+                .symbolRenderingMode(.monochrome)
                 .foregroundStyle(Color.accentColor)
                 .frame(width: 40, height: 40)
                 .background(Color.accentColor.opacity(0.11), in: RoundedRectangle(cornerRadius: 11))
