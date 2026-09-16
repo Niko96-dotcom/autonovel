@@ -63,7 +63,7 @@ struct DocumentEditorView: View {
                     .foregroundStyle(.red)
                     .help(errorMessage)
             } else {
-                Label(saveState, systemImage: saveState == "Saved" ? "checkmark.circle" : "circle.dotted")
+                Label(saveState, systemImage: saveState == "Saved" ? "checkmark.circle" : "pencil")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -89,25 +89,28 @@ struct DocumentEditorView: View {
     }
 
     private var editor: some View {
-        ZStack(alignment: .topLeading) {
-            TextEditor(text: $text)
-                .font(.system(size: document.role == .chapter ? 17 : 15, design: document.role == .chapter ? .serif : .monospaced))
-                .lineSpacing(document.role == .chapter ? 5 : 2)
-                .scrollContentBackground(.hidden)
-                .padding(.horizontal, document.role == .chapter ? 34 : 16)
-                .padding(.vertical, document.role == .chapter ? 24 : 16)
-            if text.isEmpty && loaded {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("Nothing here yet")
-                        .font(.headline)
-                    Text(document.role == .generated
-                         ? "Start the novel from Overview to generate this document, or write it here yourself."
-                         : "Start writing here. Changes save automatically.")
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $text)
+                    .font(.system(size: document.role == .chapter ? 17 : 15, design: document.role == .chapter ? .serif : .monospaced))
+                    .lineSpacing(document.role == .chapter ? 5 : 2)
+                    .scrollContentBackground(.hidden)
+                    .padding(.horizontal, document.role == .chapter ? 34 : 16)
+                    .padding(.vertical, document.role == .chapter ? 24 : 16)
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                if text.isEmpty && loaded {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Nothing here yet")
+                            .font(.headline)
+                        Text(document.role == .generated
+                             ? "Start the novel from Overview to generate this document, or write it here yourself."
+                             : "Start writing here. Changes save automatically.")
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(26)
+                    .allowsHitTesting(false)
                 }
-                .padding(26)
-                .allowsHitTesting(false)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
