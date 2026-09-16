@@ -10,6 +10,7 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 240, ideal: 240, max: 280)
         } detail: {
             detail
+                .id(store.selection)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .windowBackgroundColor))
         }
