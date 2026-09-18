@@ -247,7 +247,7 @@ struct DashboardView: View {
     private var projectChecklist: some View {
         VStack(alignment: .leading, spacing: 16) {
             SectionEyebrow(text: "Project")
-            checklistRow("Book setup", "Premise, protagonist, conflict, and world hook", done: store.hasBookBrief)
+            checklistRow("Book setup", "Premise, protagonist, conflict, and world hook", done: store.seedIsReady)
             checklistRow("Story foundation", "World, cast, voice, outline, canon, and secrets", done: store.state.foundationScore > 0)
             checklistRow("Drafted prose", done: store.actualDraftedChapters > 0)
             Button("Open New Book Setup", systemImage: "arrow.right") { store.selection = .setup }

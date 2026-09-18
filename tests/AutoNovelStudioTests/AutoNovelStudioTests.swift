@@ -93,6 +93,56 @@ final class AutoNovelStudioTests: XCTestCase {
         XCTAssertEqual(store.loadBookBrief().author, "Niko")
     }
 
+    @MainActor
+    func testSeedIsReadyRequiresEssentialFieldsWhenBookBriefExists() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-seed-ready-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = StudioStore(projectURL: root)
+        var brief = BookBrief()
+        brief.title = "The Glass Cartographer"
+        try store.saveBookBrief(brief)
+
+        let generatedSeed = try String(
+            contentsOf: root.appendingPathComponent("seed.txt"),
+            encoding: .utf8
+        )
+        XCTAssertGreaterThanOrEqual(
+            generatedSeed.split(whereSeparator: { $0.isWhitespace }).count,
+            40
+        )
+        XCTAssertEqual(store.loadBookBrief().requiredCompleted, 1)
+        XCTAssertFalse(store.seedIsReady)
+
+        brief.premise = "A mapmaker discovers that erased roads still remember their travelers."
+        brief.protagonist = "Mara, an exacting apprentice who cannot get lost."
+        brief.centralConflict = "The royal surveyor is deleting rebellious towns from reality."
+        brief.worldHook = "Maps determine which places can physically exist."
+        try store.saveBookBrief(brief)
+
+        XCTAssertEqual(store.loadBookBrief().requiredCompleted, 5)
+        XCTAssertTrue(store.seedIsReady)
+
+        let seedOnly = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-seed-only-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: seedOnly, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: seedOnly) }
+
+        let customSeed = (1...40).map { "word\($0)" }.joined(separator: " ") + "\n"
+        try customSeed.write(
+            to: seedOnly.appendingPathComponent("seed.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let seedOnlyStore = StudioStore(projectURL: seedOnly)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: seedOnly.appendingPathComponent("book.json").path)
+        )
+        XCTAssertTrue(seedOnlyStore.seedIsReady)
+    }
+
     func testPipelineStateDecodesPartialState() throws {
         let json = #"{"phase":"drafting","chapters_drafted":3,"chapters_total":12}"#.data(using: .utf8)!
         let state = try JSONDecoder().decode(PipelineState.self, from: json)

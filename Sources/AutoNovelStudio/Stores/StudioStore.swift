@@ -120,8 +120,15 @@ final class StudioStore {
             hasBookBrief = FileManager.default.fileExists(
                 atPath: projectURL.appendingPathComponent("book.json").path
             )
-            let seed = try? String(contentsOf: projectURL.appendingPathComponent("seed.txt"), encoding: .utf8)
-            seedIsReady = (seed?.split(whereSeparator: { $0.isWhitespace }).count ?? 0) >= 40
+            if hasBookBrief {
+                seedIsReady = loadBookBrief().requiredCompleted == 5
+            } else {
+                let seed = try? String(
+                    contentsOf: projectURL.appendingPathComponent("seed.txt"),
+                    encoding: .utf8
+                )
+                seedIsReady = (seed?.split(whereSeparator: { $0.isWhitespace }).count ?? 0) >= 40
+            }
             refreshError = nil
             lastRefresh = Date()
         } catch {
