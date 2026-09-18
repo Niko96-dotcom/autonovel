@@ -2,6 +2,7 @@ import SwiftUI
 
 struct StudioHelpView: View {
     var onClose: () -> Void
+    @FocusState private var isHelpFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -11,6 +12,7 @@ struct StudioHelpView: View {
                 Spacer()
                 Button("Done") { onClose() }
                     .keyboardShortcut(.defaultAction)
+                    .focused($isHelpFocused)
             }
             .padding(20)
 
@@ -33,5 +35,22 @@ struct StudioHelpView: View {
             .formStyle(.grouped)
         }
         .frame(minWidth: 480, idealWidth: 560, minHeight: 420, idealHeight: 520)
+        .focusable()
+        .onAppear { isHelpFocused = true }
+        .onExitCommand(perform: onClose)
+        .onKeyPress(.escape) {
+            onClose()
+            return .handled
+        }
+        .background {
+            Button("Close help", action: onClose)
+                .keyboardShortcut(.escape, modifiers: [])
+                .opacity(0.01)
+                .accessibilityHidden(true)
+            Button("Cancel help", action: onClose)
+                .keyboardShortcut(.cancelAction)
+                .opacity(0.01)
+                .accessibilityHidden(true)
+        }
     }
 }

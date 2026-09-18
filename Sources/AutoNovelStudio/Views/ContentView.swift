@@ -45,6 +45,10 @@ struct ContentView: View {
                         .padding(36)
                 }
                 .accessibilityAddTraits(.isModal)
+                .onKeyPress(.escape) {
+                    store.showHelp = false
+                    return .handled
+                }
                 .onExitCommand { store.showHelp = false }
             }
         }
