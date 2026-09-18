@@ -118,6 +118,74 @@ final class AutoNovelStudioTests: XCTestCase {
     }
 
     @MainActor
+    func testBookBriefDecodesPartialJSONUsingDefaults() throws {
+        let partialJSON = #"{"targetChapters":18}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(BookBrief.self, from: partialJSON)
+        var expectedPartial = BookBrief()
+        expectedPartial.targetChapters = 18
+        XCTAssertEqual(decoded, expectedPartial)
+        XCTAssertEqual(decoded.targetChapters, 18)
+        XCTAssertEqual(decoded.targetWords, 80_000)
+        XCTAssertEqual(decoded.genre, "Fantasy")
+        XCTAssertEqual(decoded.title, "")
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-brief-partial-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try partialJSON.write(to: root.appendingPathComponent("book.json"))
+        let store = StudioStore(projectURL: root)
+        let loaded = store.loadBookBrief()
+        XCTAssertEqual(loaded.targetChapters, 18)
+        XCTAssertNotEqual(loaded.targetChapters, 24)
+        XCTAssertEqual(loaded, expectedPartial)
+
+        var complete = BookBrief()
+        complete.title = "The Glass Cartographer"
+        complete.author = "Ada"
+        complete.genre = "Mystery"
+        complete.audience = "YA"
+        complete.pointOfView = "First person"
+        complete.tense = "Present tense"
+        complete.targetWords = 70_000
+        complete.targetChapters = 21
+        complete.premise = "A living-map mystery."
+        complete.protagonist = "Mara"
+        complete.protagonistWant = "To restore erased roads."
+        complete.centralConflict = "A surveyor deleting towns."
+        complete.stakes = "Places vanish."
+        complete.worldHook = "Maps determine existence."
+        complete.speculativeElement = "Living maps."
+        complete.costsAndLimits = "Ink costs memory."
+        complete.themes = "Memory."
+        complete.toneAndPromise = "Quiet dread."
+        complete.endingDirection = "The map remembers."
+        complete.mustInclude = "A glass compass."
+        complete.avoid = "Chosen ones."
+        complete.contentNotes = "Mild peril."
+
+        let completeRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-brief-complete-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: completeRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: completeRoot) }
+
+        let completeStore = StudioStore(projectURL: completeRoot)
+        try completeStore.saveBookBrief(complete)
+        XCTAssertEqual(completeStore.loadBookBrief(), complete)
+        let savedJSON = try String(
+            contentsOf: completeRoot.appendingPathComponent("book.json"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(savedJSON.contains("\"targetChapters\""))
+        XCTAssertFalse(savedJSON.contains("\"target_chapters\""))
+
+        try store.saveBookBrief(loaded)
+        XCTAssertEqual(store.loadBookBrief().targetChapters, 18)
+        XCTAssertEqual(store.loadBookBrief(), expectedPartial)
+    }
+
+    @MainActor
     func testSeedIsReadyRequiresEssentialFieldsWhenBookBriefExists() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("autonovel-seed-ready-\(UUID().uuidString)", isDirectory: true)

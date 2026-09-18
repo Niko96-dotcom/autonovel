@@ -24,6 +24,41 @@ struct BookBrief: Codable, Equatable {
     var avoid = ""
     var contentNotes = ""
 
+    enum CodingKeys: String, CodingKey {
+        case title, author, genre, audience, pointOfView, tense
+        case targetWords, targetChapters, premise, protagonist, protagonistWant
+        case centralConflict, stakes, worldHook, speculativeElement, costsAndLimits
+        case themes, toneAndPromise, endingDirection, mustInclude, avoid, contentNotes
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        title = try box.decodeIfPresent(String.self, forKey: .title) ?? ""
+        author = try box.decodeIfPresent(String.self, forKey: .author) ?? ""
+        genre = try box.decodeIfPresent(String.self, forKey: .genre) ?? "Fantasy"
+        audience = try box.decodeIfPresent(String.self, forKey: .audience) ?? "Adult"
+        pointOfView = try box.decodeIfPresent(String.self, forKey: .pointOfView) ?? "Third person limited"
+        tense = try box.decodeIfPresent(String.self, forKey: .tense) ?? "Past tense"
+        targetWords = try box.decodeIfPresent(Int.self, forKey: .targetWords) ?? 80_000
+        targetChapters = try box.decodeIfPresent(Int.self, forKey: .targetChapters) ?? 24
+        premise = try box.decodeIfPresent(String.self, forKey: .premise) ?? ""
+        protagonist = try box.decodeIfPresent(String.self, forKey: .protagonist) ?? ""
+        protagonistWant = try box.decodeIfPresent(String.self, forKey: .protagonistWant) ?? ""
+        centralConflict = try box.decodeIfPresent(String.self, forKey: .centralConflict) ?? ""
+        stakes = try box.decodeIfPresent(String.self, forKey: .stakes) ?? ""
+        worldHook = try box.decodeIfPresent(String.self, forKey: .worldHook) ?? ""
+        speculativeElement = try box.decodeIfPresent(String.self, forKey: .speculativeElement) ?? ""
+        costsAndLimits = try box.decodeIfPresent(String.self, forKey: .costsAndLimits) ?? ""
+        themes = try box.decodeIfPresent(String.self, forKey: .themes) ?? ""
+        toneAndPromise = try box.decodeIfPresent(String.self, forKey: .toneAndPromise) ?? ""
+        endingDirection = try box.decodeIfPresent(String.self, forKey: .endingDirection) ?? ""
+        mustInclude = try box.decodeIfPresent(String.self, forKey: .mustInclude) ?? ""
+        avoid = try box.decodeIfPresent(String.self, forKey: .avoid) ?? ""
+        contentNotes = try box.decodeIfPresent(String.self, forKey: .contentNotes) ?? ""
+    }
+
     var requiredCompleted: Int {
         [title, premise, protagonist, centralConflict, worldHook]
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
