@@ -64,12 +64,6 @@ struct ProviderSettingsView: View {
             configuration = store.providerConfiguration
             didLoad = true
         }
-        .onChange(of: configuration.preset) { previous, selected in
-            guard didLoad, previous != selected else { return }
-            configuration.applyPreset(selected)
-            saveMessage = nil
-            errorMessage = nil
-        }
         .onChange(of: configuration.apiProtocol) { _, selected in
             guard didLoad, configuration.preset.apiProtocol != selected else { return }
             configuration.preset = .custom
@@ -116,7 +110,7 @@ struct ProviderSettingsView: View {
 
     private var providerSection: some View {
         SettingsSection(title: "Provider") {
-            Picker("Provider", selection: $configuration.preset) {
+            Picker("Provider", selection: selectedPreset) {
                 ForEach(ProviderPreset.allCases) { preset in
                     Label(preset.title, systemImage: preset.symbol).tag(preset)
                 }
@@ -217,6 +211,19 @@ struct ProviderSettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(40)
+    }
+
+    /// Picker-only binding so `.task` / Save whole-struct assignment never stamps `defaultBaseURL`.
+    private var selectedPreset: Binding<ProviderPreset> {
+        Binding(
+            get: { configuration.preset },
+            set: { newValue in
+                guard newValue != configuration.preset else { return }
+                configuration.applyPreset(newValue)
+                saveMessage = nil
+                errorMessage = nil
+            }
+        )
     }
 
     private func modelField(_ title: String, text: Binding<String>) -> some View {

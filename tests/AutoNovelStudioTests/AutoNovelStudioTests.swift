@@ -335,6 +335,41 @@ final class AutoNovelStudioTests: XCTestCase {
         )
     }
 
+    func testSettingsLoadDoesNotApplyPresetToSavedURL() {
+        var form = ProviderConfiguration()
+        XCTAssertEqual(form.preset, .local)
+        XCTAssertEqual(form.baseURL, ProviderPreset.local.defaultBaseURL)
+
+        var savedAnthropic = ProviderConfiguration()
+        savedAnthropic.preset = .anthropic
+        savedAnthropic.apiProtocol = .anthropic
+        savedAnthropic.baseURL = "https://gateway.example.org"
+        savedAnthropic.contextSize = 1_000_000
+        form = savedAnthropic
+        XCTAssertEqual(form.preset, .anthropic)
+        XCTAssertEqual(form.baseURL, "https://gateway.example.org")
+        XCTAssertNotEqual(form.baseURL, ProviderPreset.anthropic.defaultBaseURL)
+
+        var savedOllama = ProviderConfiguration()
+        savedOllama.preset = .ollama
+        savedOllama.apiProtocol = .openAICompatible
+        savedOllama.baseURL = "http://192.168.1.5:11434"
+        form = savedOllama
+        XCTAssertEqual(form.preset, .ollama)
+        XCTAssertEqual(form.baseURL, "http://192.168.1.5:11434")
+        XCTAssertNotEqual(form.baseURL, ProviderPreset.ollama.defaultBaseURL)
+
+        form.applyPreset(.local)
+        XCTAssertEqual(form.preset, .local)
+        XCTAssertEqual(form.apiProtocol, .openAICompatible)
+        XCTAssertEqual(form.baseURL, "http://127.0.0.1:8080")
+
+        form.applyPreset(.anthropic)
+        XCTAssertEqual(form.preset, .anthropic)
+        XCTAssertEqual(form.apiProtocol, .anthropic)
+        XCTAssertEqual(form.baseURL, "https://api.anthropic.com")
+    }
+
     func testProviderValidationLimitsNoAuthenticationToLocalhost() throws {
         var configuration = ProviderConfiguration()
         configuration.baseURL = "http://127.0.0.1:11434"
