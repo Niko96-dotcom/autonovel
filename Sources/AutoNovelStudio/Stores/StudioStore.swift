@@ -120,13 +120,14 @@ final class StudioStore {
             hasBookBrief = FileManager.default.fileExists(
                 atPath: projectURL.appendingPathComponent("book.json").path
             )
+            let seed = try? String(
+                contentsOf: projectURL.appendingPathComponent("seed.txt"),
+                encoding: .utf8
+            )
+            let hasSeedContent = !(seed?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
             if hasBookBrief {
-                seedIsReady = loadBookBrief().requiredCompleted == 5
+                seedIsReady = loadBookBrief().requiredCompleted == 5 && hasSeedContent
             } else {
-                let seed = try? String(
-                    contentsOf: projectURL.appendingPathComponent("seed.txt"),
-                    encoding: .utf8
-                )
                 seedIsReady = (seed?.split(whereSeparator: { $0.isWhitespace }).count ?? 0) >= 40
             }
             refreshError = nil
@@ -148,11 +149,14 @@ final class StudioStore {
         let seedURL = projectURL.appendingPathComponent("seed.txt")
         let previousGenerated = loadBookBrief().seedText + "\n"
         let existingSeed = try? String(contentsOf: seedURL, encoding: .utf8)
+        let existingIsBlank = existingSeed.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        } ?? true
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let data = try encoder.encode(brief)
         try data.write(to: projectURL.appendingPathComponent("book.json"), options: .atomic)
-        if existingSeed == nil || existingSeed == previousGenerated {
+        if existingIsBlank || existingSeed == previousGenerated {
             try (brief.seedText + "\n").write(to: seedURL, atomically: true, encoding: .utf8)
         }
         refresh()

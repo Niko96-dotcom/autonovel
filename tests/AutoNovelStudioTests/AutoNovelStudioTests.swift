@@ -118,6 +118,48 @@ final class AutoNovelStudioTests: XCTestCase {
     }
 
     @MainActor
+    func testSaveBookBriefWritesGeneratedSeedWhenExistingSeedIsBlank() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-blank-seed-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = StudioStore(projectURL: root)
+        let seedURL = root.appendingPathComponent("seed.txt")
+        try Data().write(to: seedURL)
+
+        var brief = BookBrief()
+        brief.title = "The Glass Cartographer"
+        brief.premise = "A mapmaker discovers that erased roads still remember their travelers."
+        brief.protagonist = "Mara, an exacting apprentice who cannot get lost."
+        brief.centralConflict = "The royal surveyor is deleting rebellious towns from reality."
+        brief.worldHook = "Maps determine which places can physically exist."
+        XCTAssertEqual(brief.requiredCompleted, 5)
+
+        try store.saveBookBrief(brief)
+        XCTAssertEqual(try String(contentsOf: seedURL, encoding: .utf8), brief.seedText + "\n")
+        XCTAssertTrue(store.seedIsReady)
+
+        try "   \n\t  \n".write(to: seedURL, atomically: true, encoding: .utf8)
+        store.refresh()
+        XCTAssertFalse(store.seedIsReady)
+
+        try store.saveBookBrief(brief)
+        XCTAssertEqual(try String(contentsOf: seedURL, encoding: .utf8), brief.seedText + "\n")
+        XCTAssertTrue(store.seedIsReady)
+
+        let custom = "Polished custom seed that must be preserved.\n"
+        try custom.write(to: seedURL, atomically: true, encoding: .utf8)
+        try store.saveBookBrief(brief)
+        XCTAssertEqual(try String(contentsOf: seedURL, encoding: .utf8), custom)
+
+        try Data().write(to: seedURL)
+        store.refresh()
+        XCTAssertEqual(store.loadBookBrief().requiredCompleted, 5)
+        XCTAssertFalse(store.seedIsReady)
+    }
+
+    @MainActor
     func testBookBriefDecodesPartialJSONUsingDefaults() throws {
         let partialJSON = #"{"targetChapters":18}"#.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(BookBrief.self, from: partialJSON)
