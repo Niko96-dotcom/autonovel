@@ -89,10 +89,6 @@ struct BookSetupView: View {
                         TextField("Words", value: $brief.targetWords, format: .number)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 110)
-                            .onChange(of: brief.targetWords) { _, newValue in
-                                let clamped = min(200_000, max(15_000, newValue))
-                                if clamped != newValue { brief.targetWords = clamped }
-                            }
                         Stepper("Target words", value: $brief.targetWords, in: 15_000...200_000, step: 5_000)
                             .labelsHidden()
                         Text("words")
@@ -106,10 +102,6 @@ struct BookSetupView: View {
                         TextField("Chapters", value: $brief.targetChapters, format: .number)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 72)
-                            .onChange(of: brief.targetChapters) { _, newValue in
-                                let clamped = min(80, max(5, newValue))
-                                if clamped != newValue { brief.targetChapters = clamped }
-                            }
                         Stepper("Target chapters", value: $brief.targetChapters, in: 5...80)
                             .labelsHidden()
                         Text("chapters")
@@ -253,6 +245,7 @@ struct BookSetupView: View {
 
     @discardableResult
     private func save(showMessage: Bool = true) -> Bool {
+        brief.clampTargets()
         saveTask?.cancel()
         do {
             try store.saveBookBrief(brief)

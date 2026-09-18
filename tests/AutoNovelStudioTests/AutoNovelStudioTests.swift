@@ -48,6 +48,30 @@ final class AutoNovelStudioTests: XCTestCase {
         XCTAssertEqual(brief.requiredCompleted, 5)
     }
 
+    func testBookBriefClampsTargetsWhenSaving() {
+        var brief = BookBrief()
+        brief.targetWords = 8
+        brief.targetChapters = 2
+        XCTAssertEqual(brief.targetWords, 8)
+        XCTAssertEqual(brief.targetChapters, 2)
+
+        brief.clampTargets()
+        XCTAssertEqual(brief.targetWords, 15_000)
+        XCTAssertEqual(brief.targetChapters, 5)
+
+        brief.targetWords = 500_000
+        brief.targetChapters = 100
+        brief.clampTargets()
+        XCTAssertEqual(brief.targetWords, 200_000)
+        XCTAssertEqual(brief.targetChapters, 80)
+
+        brief.targetWords = 70_000
+        brief.targetChapters = 21
+        brief.clampTargets()
+        XCTAssertEqual(brief.targetWords, 70_000)
+        XCTAssertEqual(brief.targetChapters, 21)
+    }
+
     func testSeedTextCarriesBookChoices() {
         var brief = BookBrief()
         brief.title = "The Glass Cartographer"

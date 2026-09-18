@@ -30,6 +30,11 @@ struct BookBrief: Codable, Equatable {
             .count
     }
 
+    mutating func clampTargets() {
+        targetWords = min(200_000, max(15_000, targetWords))
+        targetChapters = min(80, max(5, targetChapters))
+    }
+
     var seedText: String {
         """
         # \(title.isEmpty ? "Untitled Novel" : title)
