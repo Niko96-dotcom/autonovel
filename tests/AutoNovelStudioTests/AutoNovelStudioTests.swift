@@ -439,6 +439,24 @@ final class AutoNovelStudioTests: XCTestCase {
         XCTAssertEqual(environment["AUTONOVEL_API_KEY"], "from-keychain")
         XCTAssertEqual(environment["PYTHONUNBUFFERED"], "1")
         XCTAssertNil(environment["AUTONOVEL_API_KEY_FILE"])
+        XCTAssertEqual(environment["PATH"], "/usr/bin")
+    }
+
+    func testProcessEnvironmentPrependsResolvedUVDirectoryToPATH() {
+        let uvDirectory = "/tmp/fake-uv-bin"
+        let environment = PipelineRunner.processEnvironment(
+            base: [
+                "PATH": "/usr/bin",
+                "AUTONOVEL_API_KEY_FILE": KeychainSecretStore.sentinel,
+            ],
+            extra: ["AUTONOVEL_API_KEY": "from-keychain"],
+            pathPrepend: [uvDirectory]
+        )
+
+        XCTAssertTrue(environment["PATH"]?.hasPrefix(uvDirectory + ":") == true)
+        XCTAssertEqual(environment["PYTHONUNBUFFERED"], "1")
+        XCTAssertEqual(environment["AUTONOVEL_API_KEY"], "from-keychain")
+        XCTAssertNil(environment["AUTONOVEL_API_KEY_FILE"])
     }
 
     func testPipelineEnvironmentDoesNotInjectLeftoverKeychainSecretOutsideManagedKey() throws {

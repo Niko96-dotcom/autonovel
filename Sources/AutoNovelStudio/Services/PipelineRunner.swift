@@ -37,7 +37,8 @@ final class PipelineRunner {
 
     nonisolated static func processEnvironment(
         base: [String: String],
-        extra: [String: String] = [:]
+        extra: [String: String] = [:],
+        pathPrepend: [String] = []
     ) -> [String: String] {
         var environment = base
         environment["PYTHONUNBUFFERED"] = "1"
@@ -46,6 +47,18 @@ final class PipelineRunner {
         }
         for (key, value) in extra {
             environment[key] = value
+        }
+        if !pathPrepend.isEmpty {
+            var components: [String] = []
+            if let path = environment["PATH"], !path.isEmpty {
+                components = path.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+            }
+            for directory in pathPrepend.reversed() where !directory.isEmpty {
+                if components.first != directory {
+                    components.insert(directory, at: 0)
+                }
+            }
+            environment["PATH"] = components.joined(separator: ":")
         }
         return environment
     }
@@ -65,7 +78,8 @@ final class PipelineRunner {
         process.currentDirectoryURL = projectURL
         process.environment = Self.processEnvironment(
             base: ProcessInfo.processInfo.environment,
-            extra: extraEnvironment
+            extra: extraEnvironment,
+            pathPrepend: [uv.deletingLastPathComponent().path]
         )
         process.standardOutput = stdout
         process.standardError = stderr
