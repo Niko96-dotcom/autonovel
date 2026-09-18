@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct StudioHelpView: View {
-    @Environment(\.dismiss) private var dismiss
+    var onClose: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -9,7 +9,7 @@ struct StudioHelpView: View {
                 Text("AutoNovel Studio Help")
                     .font(.title2.weight(.semibold))
                 Spacer()
-                Button("Done") { dismiss() }
+                Button("Done") { onClose() }
                     .keyboardShortcut(.defaultAction)
             }
             .padding(20)
