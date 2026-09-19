@@ -27,6 +27,16 @@ and previous/next navigation for focused editing.
 ./script/build_and_run.sh
 ```
 
+Local runs use **ad-hoc** codesigning only — Gatekeeper/`spctl` rejection is expected and
+is not a launch failure. Notarization is not required for ordinary debug.
+For a read-only shipping readiness report (bundle layout, signing class, identity /
+hardened-runtime gaps; **does not** re-sign or notarize):
+
+```bash
+./script/build_and_run.sh --distribution-check
+# or: ./script/check_distribution_readiness.sh
+```
+
 In the app:
 
 1. Open **New Book Setup** and fill the five essential fields.

@@ -19,7 +19,10 @@ APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 
 usage() {
-  echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--build-only]" >&2
+  echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--build-only|--distribution-check]" >&2
+  echo "  Local debug uses ad-hoc signing only. For shipping readiness (no notarize):" >&2
+  echo "    $0 --distribution-check" >&2
+  echo "    or: ./script/check_distribution_readiness.sh" >&2
 }
 
 case "$MODE" in
@@ -40,6 +43,9 @@ case "$MODE" in
     ;;
   --build-only|build-only)
     MODE="build-only"
+    ;;
+  --distribution-check|distribution-check)
+    MODE="distribution-check"
     ;;
   -h|--help|help)
     usage
@@ -130,6 +136,9 @@ PLIST
 # Not distribution: no Developer ID, no hardened runtime, no notarization,
 # and no invented entitlements plist. Gatekeeper (`spctl -a`) will reject
 # this signature by design; that is not a local launch failure.
+# Shipping readiness (read-only probe, still no notarize):
+#   ./script/check_distribution_readiness.sh
+#   or: ./script/build_and_run.sh --distribution-check
 sign_app_bundle_ad_hoc() {
   /usr/bin/codesign --force --deep --sign - "$APP_BUNDLE"
   /usr/bin/codesign --verify --deep --strict "$APP_BUNDLE"
@@ -183,6 +192,12 @@ case "$MODE" in
   build-only)
     report_local_signing_state
     echo "Built $APP_BUNDLE"
+    ;;
+  distribution-check)
+    report_local_signing_state
+    echo "Built $APP_BUNDLE (ad-hoc local; distribution check follows)"
+    # Read-only packaging/notarization readiness — does not Developer ID-sign or notarize.
+    exec "$ROOT_DIR/script/check_distribution_readiness.sh" "$APP_BUNDLE"
     ;;
   *)
     usage
