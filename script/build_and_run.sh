@@ -126,7 +126,30 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
-/usr/bin/codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
+# Local development signing only (ad-hoc / identity "-").
+# Not distribution: no Developer ID, no hardened runtime, no notarization,
+# and no invented entitlements plist. Gatekeeper (`spctl -a`) will reject
+# this signature by design; that is not a local launch failure.
+sign_app_bundle_ad_hoc() {
+  /usr/bin/codesign --force --deep --sign - "$APP_BUNDLE"
+  /usr/bin/codesign --verify --deep --strict "$APP_BUNDLE"
+}
+
+# Report signing class for triage (codesign integrity ≠ Gatekeeper trust).
+report_local_signing_state() {
+  local codesign_dv
+  codesign_dv="$(/usr/bin/codesign -dv "$APP_BUNDLE" 2>&1)"
+  if printf '%s\n' "$codesign_dv" | /usr/bin/grep -Eq 'Signature=adhoc|flags=0x2\(adhoc\)'; then
+    echo "Signing: ad-hoc (local development; Gatekeeper/spctl reject is expected)"
+  else
+    echo "Signing: unexpected non-adhoc state — inspect with:" >&2
+    echo "  codesign -dvvv --entitlements - \"$APP_BUNDLE\"" >&2
+    echo "  codesign --verify --deep --strict \"$APP_BUNDLE\"" >&2
+    return 1
+  fi
+}
+
+sign_app_bundle_ad_hoc
 
 open_app() {
   export AUTONOVEL_PROJECT_DIR="$ROOT_DIR"
@@ -151,12 +174,14 @@ case "$MODE" in
     /usr/bin/log stream --info --style compact --predicate "subsystem == \"$BUNDLE_ID\""
     ;;
   verify)
+    report_local_signing_state
     open_app
     sleep 2
     pgrep -x "$APP_NAME" >/dev/null
     echo "Verified $APP_NAME is running from $APP_BUNDLE"
     ;;
   build-only)
+    report_local_signing_state
     echo "Built $APP_BUNDLE"
     ;;
   *)
