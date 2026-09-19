@@ -604,15 +604,34 @@ final class AutoNovelStudioTests: XCTestCase {
         XCTAssertEqual(draftingStore.loadBookBrief().requiredCompleted, 5)
         XCTAssertFalse(draftingStore.completionIsVerified)
         XCTAssertEqual(draftingStore.currentPhase, .drafting)
+        XCTAssertEqual(draftingStore.state.chaptersDrafted, 5)
         XCTAssertEqual(try draftingStore.prepareFullPipelineArguments(), ["run_pipeline.py"])
         XCTAssertFalse(draftingStore.runner.isRunning)
         XCTAssertEqual(draftingStore.state.phase, "drafting")
+        XCTAssertEqual(draftingStore.state.chaptersDrafted, 0)
         XCTAssertEqual(try pipelinePhase(in: draftingRoot), "drafting")
+        XCTAssertEqual(try loadedPipelineState(in: draftingRoot).chaptersDrafted, 0)
         let draftingJSON = try stateJSON(in: draftingRoot)
         XCTAssertTrue(draftingJSON.contains("\"chapters_total\""))
         XCTAssertFalse(draftingJSON.contains("\"chaptersTotal\""))
         XCTAssertTrue(draftingJSON.contains("\"novel_score\""))
         XCTAssertFalse(draftingJSON.contains("\"novelScore\""))
+
+        let currentPhaseRoot = try makeReadyCompleteProject(
+            consecutiveChapters: 0,
+            chaptersTotal: 5,
+            novelScore: 11
+        )
+        defer { try? FileManager.default.removeItem(at: currentPhaseRoot) }
+        let currentPhaseStore = StudioStore(projectURL: currentPhaseRoot)
+        XCTAssertEqual(currentPhaseStore.currentPhase, .drafting)
+        XCTAssertEqual(currentPhaseStore.state.chaptersDrafted, 5)
+        try currentPhaseStore.persistUnverifiedCompleteResume()
+        XCTAssertFalse(currentPhaseStore.runner.isRunning)
+        XCTAssertEqual(currentPhaseStore.state.phase, "drafting")
+        XCTAssertEqual(currentPhaseStore.state.chaptersDrafted, 0)
+        XCTAssertEqual(try pipelinePhase(in: currentPhaseRoot), "drafting")
+        XCTAssertEqual(try loadedPipelineState(in: currentPhaseRoot).chaptersDrafted, 0)
 
         let revisionRoot = try makeReadyCompleteProject(
             consecutiveChapters: 5,
@@ -625,10 +644,13 @@ final class AutoNovelStudioTests: XCTestCase {
         XCTAssertFalse(revisionStore.completionIsVerified)
         XCTAssertEqual(revisionStore.actualDraftedChapters, 5)
         XCTAssertEqual(revisionStore.currentPhase, .revision)
+        XCTAssertEqual(revisionStore.state.chaptersDrafted, 5)
         XCTAssertEqual(try revisionStore.prepareFullPipelineArguments(), ["run_pipeline.py"])
         XCTAssertFalse(revisionStore.runner.isRunning)
         XCTAssertEqual(revisionStore.state.phase, "revision")
+        XCTAssertEqual(revisionStore.state.chaptersDrafted, 5)
         XCTAssertEqual(try pipelinePhase(in: revisionRoot), "revision")
+        XCTAssertEqual(try loadedPipelineState(in: revisionRoot).chaptersDrafted, 5)
 
         let verifiedRoot = try makeReadyCompleteProject(
             consecutiveChapters: 5,
@@ -684,7 +706,7 @@ final class AutoNovelStudioTests: XCTestCase {
         )
 
         let stateJSON = """
-        {"phase":"complete","status":"complete","chapters_total":\(chaptersTotal),"novel_score":\(novelScore)}
+        {"phase":"complete","status":"complete","chapters_drafted":\(chaptersTotal),"chapters_total":\(chaptersTotal),"novel_score":\(novelScore)}
         """
         try Data(stateJSON.utf8).write(to: root.appendingPathComponent("state.json"))
 
@@ -707,11 +729,14 @@ final class AutoNovelStudioTests: XCTestCase {
         try String(contentsOf: root.appendingPathComponent("state.json"), encoding: .utf8)
     }
 
-    private func pipelinePhase(in root: URL) throws -> String {
-        let state = try JSONDecoder().decode(
+    private func loadedPipelineState(in root: URL) throws -> PipelineState {
+        try JSONDecoder().decode(
             PipelineState.self,
             from: Data(contentsOf: root.appendingPathComponent("state.json"))
         )
-        return state.phase
+    }
+
+    private func pipelinePhase(in root: URL) throws -> String {
+        try loadedPipelineState(in: root).phase
     }
 }

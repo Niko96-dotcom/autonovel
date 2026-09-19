@@ -196,6 +196,12 @@ final class StudioStore {
 
     func runCurrentPhase() {
         guard currentPhase != .complete else { return }
+        do {
+            try persistUnverifiedCompleteResume()
+        } catch {
+            refreshError = error.localizedDescription
+            return
+        }
         runner.run(
             label: "Running \(currentPhase.title)",
             pythonArguments: ["run_pipeline.py", "--phase", currentPhase.rawValue],
@@ -204,28 +210,37 @@ final class StudioStore {
     }
 
     func runFullPipeline() {
-        let pythonArguments = (try? prepareFullPipelineArguments()) ?? ["run_pipeline.py"]
+        do {
+            try persistUnverifiedCompleteResume()
+        } catch {
+            refreshError = error.localizedDescription
+            return
+        }
         runner.run(
             label: actualDraftedChapters > 0 ? "Resuming at chapter \(actualDraftedChapters + 1)" : "Writing the novel",
-            pythonArguments: pythonArguments,
+            pythonArguments: ["run_pipeline.py"],
             extraEnvironment: pipelineEnvironment()
         )
     }
 
     func prepareFullPipelineArguments() throws -> [String] {
-        if state.phase.lowercased() == "complete", !completionIsVerified {
-            var next = state
-            next.phase = currentPhase.rawValue
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-            let data = try encoder.encode(next)
-            try data.write(
-                to: projectURL.appendingPathComponent("state.json"),
-                options: .atomic
-            )
-            refresh()
-        }
+        try persistUnverifiedCompleteResume()
         return ["run_pipeline.py"]
+    }
+
+    func persistUnverifiedCompleteResume() throws {
+        guard state.phase.lowercased() == "complete", !completionIsVerified else { return }
+        var next = state
+        next.phase = currentPhase.rawValue
+        next.chaptersDrafted = actualDraftedChapters
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        let data = try encoder.encode(next)
+        try data.write(
+            to: projectURL.appendingPathComponent("state.json"),
+            options: .atomic
+        )
+        refresh()
     }
 
     private func pipelineEnvironment() -> [String: String] {
