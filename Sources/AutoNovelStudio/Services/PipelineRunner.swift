@@ -82,6 +82,7 @@ final class PipelineRunner {
         guard !isRunning else { return }
         guard let uv = resolveUV() else {
             errorMessage = "Could not find uv. Expected it in ~/.local/bin or Homebrew."
+            StudioLog.pipeline.error("Pipeline start failed: uv not found")
             return
         }
 
@@ -99,7 +100,8 @@ final class PipelineRunner {
         process.standardOutput = stdout
         process.standardError = stderr
 
-        output = "$ uv run python \(pythonArguments.joined(separator: " "))\n\n"
+        let argumentSummary = pythonArguments.joined(separator: " ")
+        output = "$ uv run python \(argumentSummary)\n\n"
         self.label = label
         exitCode = nil
         errorMessage = nil
@@ -111,6 +113,10 @@ final class PipelineRunner {
         stderrPipe = stderr
         stdoutDecoder = UTF8StreamDecoder()
         stderrDecoder = UTF8StreamDecoder()
+
+        StudioLog.pipeline.info(
+            "Pipeline started: \(label, privacy: .public) (\(argumentSummary, privacy: .public))"
+        )
 
         let stdoutDecoder = self.stdoutDecoder
         let stderrDecoder = self.stderrDecoder
@@ -138,6 +144,9 @@ final class PipelineRunner {
                 if state.recordSuccessfulCheck {
                     self.lastSuccessfulCheck = Date()
                 }
+                StudioLog.pipeline.info(
+                    "Pipeline finished: \(state.label, privacy: .public) (exit \(finished.terminationStatus, privacy: .public))"
+                )
                 self.releasePipes()
             }
         }
@@ -148,6 +157,9 @@ final class PipelineRunner {
             isRunning = false
             self.label = "Failed"
             errorMessage = error.localizedDescription
+            StudioLog.pipeline.error(
+                "Pipeline launch failed: \(error.localizedDescription, privacy: .public)"
+            )
             releasePipes()
         }
     }
@@ -155,6 +167,7 @@ final class PipelineRunner {
     func stop() {
         guard let process, process.isRunning else { return }
         userStopped = true
+        StudioLog.pipeline.info("Pipeline stop requested")
         append("\n[Stopping at your request…]\n")
         process.interrupt()
     }

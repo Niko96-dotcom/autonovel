@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         NSHelpManager.shared.registerBooks(in: Bundle.main)
+        StudioLog.windowing.info("App finished launching")
         let names: [Notification.Name] = [
             NSWindow.didBecomeKeyNotification,
             NSWindow.didExposeNotification,
@@ -43,6 +44,9 @@ struct AutoNovelStudioApp: App {
         WindowGroup("AutoNovel Studio", id: "studio-main") {
             ContentView(store: store)
                 .frame(minWidth: 900, minHeight: 640)
+                .onAppear {
+                    StudioLog.windowing.info("Main studio window appeared")
+                }
                 .task { store.startMonitoring() }
         }
         .defaultSize(width: 1_000, height: 760)
