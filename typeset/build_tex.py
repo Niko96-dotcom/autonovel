@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build book-specific LaTeX sources from every current chapter file."""
+"""Build book-specific LaTeX sources and EPUB identity from book.json."""
 
 from __future__ import annotations
 
@@ -45,13 +45,26 @@ def md_to_latex(body: str) -> str:
 
 
 def load_book() -> dict:
-    defaults = {"title": "Untitled Novel", "author": "", "genre": "Fiction"}
+    """Merge book.json onto safe defaults (Bells fixture strings are not defaults)."""
+    defaults = {
+        "title": "Untitled Novel",
+        "author": "",
+        "genre": "Fiction",
+        "publisher": "Publisher Name",
+        "url": "https://example.com",
+    }
     path = BASE_DIR / "book.json"
     if path.exists():
         try:
             candidate = json.loads(path.read_text())
             if isinstance(candidate, dict):
-                defaults.update(candidate)
+                defaults.update(
+                    {
+                        key: value
+                        for key, value in candidate.items()
+                        if value is not None
+                    }
+                )
         except (OSError, json.JSONDecodeError):
             pass
     return defaults
@@ -75,17 +88,25 @@ def build_chapters() -> int:
         title = lines[0].lstrip("# ").strip()
         if ": " in title:
             title = title.split(": ", 1)[1]
-        rendered.append(f"\\chapter{{{latex_escape(title)}}}\n\n{md_to_latex(chr(10).join(lines[1:]).strip())}\n")
+        rendered.append(
+            f"\\chapter{{{latex_escape(title)}}}\n\n"
+            f"{md_to_latex(chr(10).join(lines[1:]).strip())}\n"
+        )
         print(f"  {path.name}: {title}")
-    (OUT_DIR / "chapters_content.tex").write_text("\n\\clearpage\n\n".join(rendered))
+    (OUT_DIR / "chapters_content.tex").write_text(
+        "\n\\clearpage\n\n".join(rendered)
+    )
     return len(rendered)
 
 
 def build_document() -> None:
+    """Write book-specific typeset/novel.tex from the current book.json brief."""
     book = load_book()
     title = latex_escape(str(book.get("title") or "Untitled Novel"))
     author = latex_escape(str(book.get("author") or ""))
     genre = latex_escape(str(book.get("genre") or "Fiction"))
+    url = str(book.get("url") or "https://example.com").strip()
+    url_tex = latex_escape(url)
     document = rf"""\documentclass[11pt,openany]{{book}}
 \usepackage[paperwidth=5.5in,paperheight=8.5in,inner=0.85in,outer=0.65in,top=0.75in,bottom=0.85in,headheight=14pt]{{geometry}}
 \usepackage{{fontspec}}
@@ -118,6 +139,15 @@ def build_document() -> None:
 {{\Large\textsc{{{author}}}}}
 \end{{center}}
 \clearpage
+\thispagestyle{{empty}}
+\vspace*{{\fill}}
+\begin{{center}}
+{{\small This is a work of fiction}}\\[4pt]
+{{\small created by Hermes Agent.}}\\[18pt]
+{{\small\texttt{{{url_tex}}}}}
+\end{{center}}
+\vspace*{{\fill}}
+\clearpage
 \mainmatter
 \input{{typeset/chapters_content.tex}}
 \end{{document}}
@@ -125,9 +155,72 @@ def build_document() -> None:
     (OUT_DIR / "novel.tex").write_text(document)
 
 
-if __name__ == "__main__":
+def write_epub_identity() -> None:
+    """Write EPUB metadata and front matter from book.json (not a frozen title)."""
+    book = load_book()
+    title = str(book.get("title") or "Untitled Novel")
+    author = str(book.get("author") or "")
+    publisher = str(book.get("publisher") or "Publisher Name")
+    url = str(book.get("url") or "https://example.com").strip()
+    date = str(book.get("date") or "2026")
+
+    (OUT_DIR / "epub_metadata.yaml").write_text(
+        "---\n"
+        f"title: {title}\n"
+        f"author: {author}\n"
+        "lang: en\n"
+        "rights: This is a work of fiction.\n"
+        f"publisher: {publisher}\n"
+        f"date: {date}\n"
+        "cover-image: ../art/cover.png\n"
+        "css: epub_style.css\n"
+        "titlepage: false\n"
+        "...\n"
+    )
+    (OUT_DIR / "epub_front_matter.md").write_text(
+        "\\\n"
+        "\\\n"
+        "\n"
+        f"**{title}**\n"
+        "\n"
+        "\\\n"
+        "\n"
+        f"*{author}*\n"
+        "\n"
+        "\\\n"
+        "\n"
+        "*Created by Hermes Agent*\n"
+        "\n"
+        "\\\n"
+        "\n"
+        f"*{url}*\n"
+    )
+    (OUT_DIR / "epub_colophon.md").write_text(
+        "---\n"
+        'title: ""\n'
+        "---\n"
+        "\n"
+        "\\\n"
+        "\n"
+        "*This is a work of fiction created by Hermes Agent.*\n"
+        "\n"
+        "\\\n"
+        "\n"
+        f"*{url}*\n"
+    )
+    # Back cover stays text-only (no image reference).
+    (OUT_DIR / "epub_back_cover.md").write_text("\n")
+
+
+def main() -> None:
+    OUT_DIR.mkdir(exist_ok=True)
     count = build_chapters()
     if count == 0:
         raise SystemExit("No chapter files found.")
     build_document()
-    print(f"Wrote {count} chapters and book-specific typeset/novel.tex")
+    write_epub_identity()
+    print(f"Wrote {count} chapters and book-specific typeset identity from book.json")
+
+
+if __name__ == "__main__":
+    main()

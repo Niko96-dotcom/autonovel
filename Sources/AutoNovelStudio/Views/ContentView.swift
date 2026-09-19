@@ -38,13 +38,17 @@ struct ContentView: View {
                     Color.black.opacity(reduceMotion ? 0.18 : 0.28)
                         .ignoresSafeArea()
                         .onTapGesture { store.showHelp = false }
-                    StudioHelpView()
+                    StudioHelpView(onClose: { store.showHelp = false })
                         .background(Color(nsColor: .windowBackgroundColor))
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .shadow(color: reduceMotion ? .clear : .black.opacity(0.28), radius: reduceMotion ? 0 : 28, y: reduceMotion ? 0 : 10)
                         .padding(36)
                 }
                 .accessibilityAddTraits(.isModal)
+                .onKeyPress(.escape) {
+                    store.showHelp = false
+                    return .handled
+                }
                 .onExitCommand { store.showHelp = false }
             }
         }

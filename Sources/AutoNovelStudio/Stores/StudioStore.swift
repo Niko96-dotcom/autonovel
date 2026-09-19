@@ -120,8 +120,16 @@ final class StudioStore {
             hasBookBrief = FileManager.default.fileExists(
                 atPath: projectURL.appendingPathComponent("book.json").path
             )
-            let seed = try? String(contentsOf: projectURL.appendingPathComponent("seed.txt"), encoding: .utf8)
-            seedIsReady = (seed?.split(whereSeparator: { $0.isWhitespace }).count ?? 0) >= 40
+            let seed = try? String(
+                contentsOf: projectURL.appendingPathComponent("seed.txt"),
+                encoding: .utf8
+            )
+            let hasSeedContent = !(seed?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+            if hasBookBrief {
+                seedIsReady = loadBookBrief().requiredCompleted == 5 && hasSeedContent
+            } else {
+                seedIsReady = (seed?.split(whereSeparator: { $0.isWhitespace }).count ?? 0) >= 40
+            }
             refreshError = nil
             lastRefresh = Date()
         } catch {
@@ -138,15 +146,19 @@ final class StudioStore {
     }
 
     func saveBookBrief(_ brief: BookBrief) throws {
+        let seedURL = projectURL.appendingPathComponent("seed.txt")
+        let previousGenerated = loadBookBrief().seedText + "\n"
+        let existingSeed = try? String(contentsOf: seedURL, encoding: .utf8)
+        let existingIsBlank = existingSeed.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        } ?? true
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let data = try encoder.encode(brief)
         try data.write(to: projectURL.appendingPathComponent("book.json"), options: .atomic)
-        try (brief.seedText + "\n").write(
-            to: projectURL.appendingPathComponent("seed.txt"),
-            atomically: true,
-            encoding: .utf8
-        )
+        if existingIsBlank || existingSeed == previousGenerated {
+            try (brief.seedText + "\n").write(to: seedURL, atomically: true, encoding: .utf8)
+        }
         refresh()
     }
 
@@ -184,6 +196,12 @@ final class StudioStore {
 
     func runCurrentPhase() {
         guard currentPhase != .complete else { return }
+        do {
+            try persistUnverifiedCompleteResume()
+        } catch {
+            refreshError = error.localizedDescription
+            return
+        }
         runner.run(
             label: "Running \(currentPhase.title)",
             pythonArguments: ["run_pipeline.py", "--phase", currentPhase.rawValue],
@@ -192,6 +210,12 @@ final class StudioStore {
     }
 
     func runFullPipeline() {
+        do {
+            try persistUnverifiedCompleteResume()
+        } catch {
+            refreshError = error.localizedDescription
+            return
+        }
         runner.run(
             label: actualDraftedChapters > 0 ? "Resuming at chapter \(actualDraftedChapters + 1)" : "Writing the novel",
             pythonArguments: ["run_pipeline.py"],
@@ -199,9 +223,28 @@ final class StudioStore {
         )
     }
 
+    func prepareFullPipelineArguments() throws -> [String] {
+        try persistUnverifiedCompleteResume()
+        return ["run_pipeline.py"]
+    }
+
+    func persistUnverifiedCompleteResume() throws {
+        guard state.phase.lowercased() == "complete", !completionIsVerified else { return }
+        var next = state
+        next.phase = currentPhase.rawValue
+        next.chaptersDrafted = actualDraftedChapters
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        let data = try encoder.encode(next)
+        try data.write(
+            to: projectURL.appendingPathComponent("state.json"),
+            options: .atomic
+        )
+        refresh()
+    }
+
     private func pipelineEnvironment() -> [String: String] {
-        guard let key = environmentStore.resolvedManagedAPIKey() else { return [:] }
-        return ["AUTONOVEL_API_KEY": key]
+        environmentStore.pipelineEnvironment(credentialMode: providerConfiguration.credentialMode)
     }
 
     private func loadChapters() throws -> [ChapterInfo] {

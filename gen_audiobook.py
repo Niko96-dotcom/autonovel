@@ -58,6 +58,17 @@ def load_voices():
     return voices
 
 
+def resolve_voice_id(voices, speaker):
+    """Return voice_id for speaker, matching keys case-insensitively."""
+    if speaker in voices:
+        return voices[speaker]
+    wanted = speaker.casefold()
+    for name, vid in voices.items():
+        if name.casefold() == wanted:
+            return vid
+    return None
+
+
 def load_script(ch_num):
     """Load a chapter's parsed script."""
     path = SCRIPTS_DIR / f"ch{ch_num:02d}_script.json"
@@ -77,15 +88,20 @@ def chunk_segments(segments, voices, max_chars=MAX_CHARS_PER_CALL):
     current_chunk = []
     current_chars = 0
     fallback_voice = list(voices.values())[0] if voices else None
+    unknown_speakers = []
 
     for seg in segments:
         speaker = seg["speaker"]
         text = seg["text"]
 
-        # Resolve voice_id
-        voice_id = voices.get(speaker)
+        voice_id = resolve_voice_id(voices, speaker)
         if not voice_id:
-            voice_id = voices.get("MINOR", voices.get("NARRATOR", fallback_voice))
+            unknown_speakers.append(speaker)
+            voice_id = (
+                resolve_voice_id(voices, "MINOR")
+                or resolve_voice_id(voices, "NARRATOR")
+                or fallback_voice
+            )
         if not voice_id:
             continue
 
@@ -130,6 +146,10 @@ def chunk_segments(segments, voices, max_chars=MAX_CHARS_PER_CALL):
 
     if current_chunk:
         chunks.append(current_chunk)
+
+    if unknown_speakers:
+        unique = list(dict.fromkeys(unknown_speakers))
+        print(f"Unknown speakers ({len(unique)}): {', '.join(unique)}")
 
     return chunks
 
@@ -279,11 +299,9 @@ def main():
     parser.add_argument("--status", action="store_true", help="Show generation status for all chapters")
 
     args = parser.parse_args()
-    
-    client = get_client()
 
     if args.list_voices:
-        list_voices(client)
+        list_voices(get_client())
         return
 
     if args.assemble:
@@ -313,6 +331,8 @@ def main():
                 print(f"  Ch {ch_num:2d}: ✗ not generated")
         return
 
+    client = get_client()
+
     voices = load_voices()
     if not voices:
         print("ERROR: No voices configured. Edit audiobook_voices.json with real voice IDs.")
@@ -329,18 +349,22 @@ def main():
         generate_chapter(args.test, client, voices, test_mode=True)
         return
 
-    # Determine chapter range
-    scripts = sorted(SCRIPTS_DIR.glob("ch*_script.json"))
-    total = len(scripts)
-    
-    start = args.start or 1
-    end = args.end or total
+    # Use parsed script chapter numbers, not range(1, file_count+1).
+    present = []
+    for script_f in sorted(SCRIPTS_DIR.glob("ch*_script.json")):
+        present.append(int(script_f.stem.replace("_script", "").replace("ch", "")))
+    if args.start is None:
+        chapters = present
+    elif args.end is None:
+        chapters = [args.start]
+    else:
+        chapters = [n for n in present if args.start <= n <= args.end]
 
-    print(f"Generating audiobook: chapters {start}-{end}")
+    print(f"Generating audiobook: chapters {', '.join(str(n) for n in chapters)}")
     print(f"  Voices configured: {list(voices.keys())}")
     print()
 
-    for ch_num in range(start, end + 1):
+    for ch_num in chapters:
         generate_chapter(ch_num, client, voices)
         print()
 

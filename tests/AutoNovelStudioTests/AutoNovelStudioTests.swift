@@ -9,6 +9,32 @@ final class AutoNovelStudioTests: XCTestCase {
         XCTAssertNil(PipelineRunner.latestModelStatus(in: "Starting pipeline\n"))
     }
 
+    func testLatestModelStatusTracksNewRequestAndIgnoresIncompleteLines_utf8DecoderReassemblesSplitCodepoints() {
+        let flushed = PipelineRunner.UTF8StreamDecoder()
+        XCTAssertEqual(flushed.consume(Data("AUTONOVEL_LOCAL_OK".utf8), flush: true), "AUTONOVEL_LOCAL_OK")
+
+        let cafe = "café"
+        let bytes = Array(cafe.utf8)
+        XCTAssertEqual(bytes.suffix(2), [0xC3, 0xA9])
+        XCTAssertNil(String(bytes: bytes.dropLast(), encoding: .utf8))
+        XCTAssertNil(String(bytes: [bytes.last!], encoding: .utf8))
+
+        let split = PipelineRunner.UTF8StreamDecoder()
+        XCTAssertEqual(split.consume(Data(bytes.dropLast())), "caf")
+        XCTAssertEqual(split.consume(Data([bytes.last!])), "é")
+
+        let joined = PipelineRunner.UTF8StreamDecoder()
+        XCTAssertEqual(
+            joined.consume(Data(bytes.dropLast())) + joined.consume(Data([bytes.last!])),
+            cafe
+        )
+
+        let thumb = Array("👍".utf8)
+        let emoji = PipelineRunner.UTF8StreamDecoder()
+        XCTAssertEqual(emoji.consume(Data(thumb.prefix(2))), "")
+        XCTAssertEqual(emoji.consume(Data(thumb.dropFirst(2))), "👍")
+    }
+
     func testBookBriefCountsOnlyEssentialFields() {
         var brief = BookBrief()
         XCTAssertEqual(brief.requiredCompleted, 0)
@@ -20,6 +46,30 @@ final class AutoNovelStudioTests: XCTestCase {
         brief.worldHook = "Maps determine which places can physically exist."
 
         XCTAssertEqual(brief.requiredCompleted, 5)
+    }
+
+    func testBookBriefClampsTargetsWhenSaving() {
+        var brief = BookBrief()
+        brief.targetWords = 8
+        brief.targetChapters = 2
+        XCTAssertEqual(brief.targetWords, 8)
+        XCTAssertEqual(brief.targetChapters, 2)
+
+        brief.clampTargets()
+        XCTAssertEqual(brief.targetWords, 15_000)
+        XCTAssertEqual(brief.targetChapters, 5)
+
+        brief.targetWords = 500_000
+        brief.targetChapters = 100
+        brief.clampTargets()
+        XCTAssertEqual(brief.targetWords, 200_000)
+        XCTAssertEqual(brief.targetChapters, 80)
+
+        brief.targetWords = 70_000
+        brief.targetChapters = 21
+        brief.clampTargets()
+        XCTAssertEqual(brief.targetWords, 70_000)
+        XCTAssertEqual(brief.targetChapters, 21)
     }
 
     func testSeedTextCarriesBookChoices() {
@@ -34,6 +84,197 @@ final class AutoNovelStudioTests: XCTestCase {
         XCTAssertTrue(brief.seedText.contains("21 chapters"))
         XCTAssertTrue(brief.seedText.contains("A living-map mystery."))
         XCTAssertTrue(brief.seedText.contains("Not specified — let the pipeline propose options."))
+    }
+
+    @MainActor
+    func testSaveBookBriefSkipsOverwriteWhenSeedWasCustomized() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-seed-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = StudioStore(projectURL: root)
+        var brief = BookBrief()
+        brief.title = "The Glass Cartographer"
+        brief.author = "Ada"
+        try store.saveBookBrief(brief)
+
+        let seedURL = root.appendingPathComponent("seed.txt")
+        XCTAssertEqual(try String(contentsOf: seedURL, encoding: .utf8), brief.seedText + "\n")
+
+        brief.author = "Mara"
+        try store.saveBookBrief(brief)
+        XCTAssertEqual(try String(contentsOf: seedURL, encoding: .utf8), brief.seedText + "\n")
+        XCTAssertTrue(try String(contentsOf: seedURL, encoding: .utf8).contains("Author: Mara"))
+
+        let custom = "Polished story seed from DocumentEditorView.\n"
+        try store.saveText(custom, for: .seed)
+
+        brief.author = "Niko"
+        try store.saveBookBrief(brief)
+
+        XCTAssertEqual(try String(contentsOf: seedURL, encoding: .utf8), custom)
+        XCTAssertEqual(store.loadBookBrief().author, "Niko")
+    }
+
+    @MainActor
+    func testSaveBookBriefWritesGeneratedSeedWhenExistingSeedIsBlank() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-blank-seed-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = StudioStore(projectURL: root)
+        let seedURL = root.appendingPathComponent("seed.txt")
+        try Data().write(to: seedURL)
+
+        var brief = BookBrief()
+        brief.title = "The Glass Cartographer"
+        brief.premise = "A mapmaker discovers that erased roads still remember their travelers."
+        brief.protagonist = "Mara, an exacting apprentice who cannot get lost."
+        brief.centralConflict = "The royal surveyor is deleting rebellious towns from reality."
+        brief.worldHook = "Maps determine which places can physically exist."
+        XCTAssertEqual(brief.requiredCompleted, 5)
+
+        try store.saveBookBrief(brief)
+        XCTAssertEqual(try String(contentsOf: seedURL, encoding: .utf8), brief.seedText + "\n")
+        XCTAssertTrue(store.seedIsReady)
+
+        try "   \n\t  \n".write(to: seedURL, atomically: true, encoding: .utf8)
+        store.refresh()
+        XCTAssertFalse(store.seedIsReady)
+
+        try store.saveBookBrief(brief)
+        XCTAssertEqual(try String(contentsOf: seedURL, encoding: .utf8), brief.seedText + "\n")
+        XCTAssertTrue(store.seedIsReady)
+
+        let custom = "Polished custom seed that must be preserved.\n"
+        try custom.write(to: seedURL, atomically: true, encoding: .utf8)
+        try store.saveBookBrief(brief)
+        XCTAssertEqual(try String(contentsOf: seedURL, encoding: .utf8), custom)
+
+        try Data().write(to: seedURL)
+        store.refresh()
+        XCTAssertEqual(store.loadBookBrief().requiredCompleted, 5)
+        XCTAssertFalse(store.seedIsReady)
+    }
+
+    @MainActor
+    func testBookBriefDecodesPartialJSONUsingDefaults() throws {
+        let partialJSON = #"{"targetChapters":18}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(BookBrief.self, from: partialJSON)
+        var expectedPartial = BookBrief()
+        expectedPartial.targetChapters = 18
+        XCTAssertEqual(decoded, expectedPartial)
+        XCTAssertEqual(decoded.targetChapters, 18)
+        XCTAssertEqual(decoded.targetWords, 80_000)
+        XCTAssertEqual(decoded.genre, "Fantasy")
+        XCTAssertEqual(decoded.title, "")
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-brief-partial-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try partialJSON.write(to: root.appendingPathComponent("book.json"))
+        let store = StudioStore(projectURL: root)
+        let loaded = store.loadBookBrief()
+        XCTAssertEqual(loaded.targetChapters, 18)
+        XCTAssertNotEqual(loaded.targetChapters, 24)
+        XCTAssertEqual(loaded, expectedPartial)
+
+        var complete = BookBrief()
+        complete.title = "The Glass Cartographer"
+        complete.author = "Ada"
+        complete.genre = "Mystery"
+        complete.audience = "YA"
+        complete.pointOfView = "First person"
+        complete.tense = "Present tense"
+        complete.targetWords = 70_000
+        complete.targetChapters = 21
+        complete.premise = "A living-map mystery."
+        complete.protagonist = "Mara"
+        complete.protagonistWant = "To restore erased roads."
+        complete.centralConflict = "A surveyor deleting towns."
+        complete.stakes = "Places vanish."
+        complete.worldHook = "Maps determine existence."
+        complete.speculativeElement = "Living maps."
+        complete.costsAndLimits = "Ink costs memory."
+        complete.themes = "Memory."
+        complete.toneAndPromise = "Quiet dread."
+        complete.endingDirection = "The map remembers."
+        complete.mustInclude = "A glass compass."
+        complete.avoid = "Chosen ones."
+        complete.contentNotes = "Mild peril."
+
+        let completeRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-brief-complete-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: completeRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: completeRoot) }
+
+        let completeStore = StudioStore(projectURL: completeRoot)
+        try completeStore.saveBookBrief(complete)
+        XCTAssertEqual(completeStore.loadBookBrief(), complete)
+        let savedJSON = try String(
+            contentsOf: completeRoot.appendingPathComponent("book.json"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(savedJSON.contains("\"targetChapters\""))
+        XCTAssertFalse(savedJSON.contains("\"target_chapters\""))
+
+        try store.saveBookBrief(loaded)
+        XCTAssertEqual(store.loadBookBrief().targetChapters, 18)
+        XCTAssertEqual(store.loadBookBrief(), expectedPartial)
+    }
+
+    @MainActor
+    func testSeedIsReadyRequiresEssentialFieldsWhenBookBriefExists() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-seed-ready-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = StudioStore(projectURL: root)
+        var brief = BookBrief()
+        brief.title = "The Glass Cartographer"
+        try store.saveBookBrief(brief)
+
+        let generatedSeed = try String(
+            contentsOf: root.appendingPathComponent("seed.txt"),
+            encoding: .utf8
+        )
+        XCTAssertGreaterThanOrEqual(
+            generatedSeed.split(whereSeparator: { $0.isWhitespace }).count,
+            40
+        )
+        XCTAssertEqual(store.loadBookBrief().requiredCompleted, 1)
+        XCTAssertFalse(store.seedIsReady)
+
+        brief.premise = "A mapmaker discovers that erased roads still remember their travelers."
+        brief.protagonist = "Mara, an exacting apprentice who cannot get lost."
+        brief.centralConflict = "The royal surveyor is deleting rebellious towns from reality."
+        brief.worldHook = "Maps determine which places can physically exist."
+        try store.saveBookBrief(brief)
+
+        XCTAssertEqual(store.loadBookBrief().requiredCompleted, 5)
+        XCTAssertTrue(store.seedIsReady)
+
+        let seedOnly = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-seed-only-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: seedOnly, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: seedOnly) }
+
+        let customSeed = (1...40).map { "word\($0)" }.joined(separator: " ") + "\n"
+        try customSeed.write(
+            to: seedOnly.appendingPathComponent("seed.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let seedOnlyStore = StudioStore(projectURL: seedOnly)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: seedOnly.appendingPathComponent("book.json").path)
+        )
+        XCTAssertTrue(seedOnlyStore.seedIsReady)
     }
 
     func testPipelineStateDecodesPartialState() throws {
@@ -68,11 +309,40 @@ final class AutoNovelStudioTests: XCTestCase {
             index: 1,
             columns: ["discarded", "ch02", "5.5", "1000", "discard", "Retry"]
         )
+        let forced = ActivityRecord(
+            index: 2,
+            columns: ["abc123", "ch01", "?", "1200", "forced", "Chapter 1: kept after max attempts"]
+        )
 
         XCTAssertTrue(failed.isFailure)
         XCTAssertEqual(failed.resultSymbol, "exclamationmark.triangle.fill")
         XCTAssertTrue(discarded.isDiscarded)
         XCTAssertEqual(discarded.resultSymbol, "arrow.counterclockwise.circle")
+        XCTAssertTrue(forced.isForced)
+        XCTAssertNotEqual(forced.resultSymbol, "checkmark.circle")
+        XCTAssertEqual(forced.resultSymbol, "exclamationmark.triangle.fill")
+        XCTAssertFalse(forced.isSuccessAppearance)
+        XCTAssertFalse(discarded.isSuccessAppearance)
+        XCTAssertFalse(failed.isSuccessAppearance)
+    }
+
+    func testForcedEvaluationHistoryIsNotShownAsSuccess() {
+        let forced = ActivityRecord(
+            index: 0,
+            columns: ["deadbeef", "ch03", "?", "1840", "forced", "Chapter 3: kept after max attempts"]
+        )
+        let kept = ActivityRecord(
+            index: 1,
+            columns: ["abc123", "ch01", "8.0", "1200", "keep", "Chapter 1 kept"]
+        )
+
+        XCTAssertTrue(forced.isForced)
+        XCTAssertFalse(forced.isFailure)
+        XCTAssertFalse(forced.isDiscarded)
+        XCTAssertNotEqual(forced.resultSymbol, "checkmark.circle")
+        XCTAssertEqual(forced.resultSymbol, "exclamationmark.triangle.fill")
+        XCTAssertFalse(forced.isSuccessAppearance)
+        XCTAssertTrue(kept.isSuccessAppearance)
     }
 
     func testChapterWithoutHeadingUsesStableNumberInsteadOfProseAsTitle() {
@@ -114,6 +384,41 @@ final class AutoNovelStudioTests: XCTestCase {
             ProviderPreset.infer(apiProtocol: .anthropic, baseURL: "https://gateway.example.org"),
             .anthropic
         )
+    }
+
+    func testSettingsLoadDoesNotApplyPresetToSavedURL() {
+        var form = ProviderConfiguration()
+        XCTAssertEqual(form.preset, .local)
+        XCTAssertEqual(form.baseURL, ProviderPreset.local.defaultBaseURL)
+
+        var savedAnthropic = ProviderConfiguration()
+        savedAnthropic.preset = .anthropic
+        savedAnthropic.apiProtocol = .anthropic
+        savedAnthropic.baseURL = "https://gateway.example.org"
+        savedAnthropic.contextSize = 1_000_000
+        form = savedAnthropic
+        XCTAssertEqual(form.preset, .anthropic)
+        XCTAssertEqual(form.baseURL, "https://gateway.example.org")
+        XCTAssertNotEqual(form.baseURL, ProviderPreset.anthropic.defaultBaseURL)
+
+        var savedOllama = ProviderConfiguration()
+        savedOllama.preset = .ollama
+        savedOllama.apiProtocol = .openAICompatible
+        savedOllama.baseURL = "http://192.168.1.5:11434"
+        form = savedOllama
+        XCTAssertEqual(form.preset, .ollama)
+        XCTAssertEqual(form.baseURL, "http://192.168.1.5:11434")
+        XCTAssertNotEqual(form.baseURL, ProviderPreset.ollama.defaultBaseURL)
+
+        form.applyPreset(.local)
+        XCTAssertEqual(form.preset, .local)
+        XCTAssertEqual(form.apiProtocol, .openAICompatible)
+        XCTAssertEqual(form.baseURL, "http://127.0.0.1:8080")
+
+        form.applyPreset(.anthropic)
+        XCTAssertEqual(form.preset, .anthropic)
+        XCTAssertEqual(form.apiProtocol, .anthropic)
+        XCTAssertEqual(form.baseURL, "https://api.anthropic.com")
     }
 
     func testProviderValidationLimitsNoAuthenticationToLocalhost() throws {
@@ -176,7 +481,7 @@ final class AutoNovelStudioTests: XCTestCase {
         XCTAssertEqual(try secrets.read(), "private-test-key")
         XCTAssertEqual(values["FAL_KEY"], "preserve-me")
         XCTAssertEqual(values["AUTONOVEL_API_KEY_FILE"], KeychainSecretStore.sentinel)
-        XCTAssertEqual(values["AUTONOVEL_API_KEY"], "")
+        XCTAssertNil(values["AUTONOVEL_API_KEY"])
         XCTAssertFalse(envText.contains("private-test-key"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: keyURL.path))
     }
@@ -220,6 +525,186 @@ final class AutoNovelStudioTests: XCTestCase {
         XCTAssertEqual(environment["AUTONOVEL_API_KEY"], "from-keychain")
         XCTAssertEqual(environment["PYTHONUNBUFFERED"], "1")
         XCTAssertNil(environment["AUTONOVEL_API_KEY_FILE"])
+        XCTAssertEqual(environment["PATH"], "/usr/bin")
+    }
+
+    @MainActor
+    func testUserStopIsNotReportedAsCommandFailure() {
+        let interrupted = PipelineRunner.finishState(
+            terminationStatus: 130,
+            userStopped: true,
+            pythonArguments: ["run_pipeline.py"]
+        )
+        XCTAssertEqual(interrupted.label, "Stopped")
+        XCTAssertNil(interrupted.errorMessage)
+        XCTAssertFalse(interrupted.recordSuccessfulCheck)
+
+        let crashed = PipelineRunner.finishState(
+            terminationStatus: 1,
+            userStopped: false,
+            pythonArguments: ["run_pipeline.py"]
+        )
+        XCTAssertEqual(crashed.label, "Failed")
+        XCTAssertEqual(crashed.errorMessage, "The command exited with code 1.")
+        XCTAssertFalse(crashed.recordSuccessfulCheck)
+
+        let check = PipelineRunner.finishState(
+            terminationStatus: 0,
+            userStopped: false,
+            pythonArguments: ["check_llm.py"]
+        )
+        XCTAssertEqual(check.label, "Finished")
+        XCTAssertNil(check.errorMessage)
+        XCTAssertTrue(check.recordSuccessfulCheck)
+    }
+
+    func testProcessEnvironmentPrependsResolvedUVDirectoryToPATH() {
+        let uvDirectory = "/tmp/fake-uv-bin"
+        let environment = PipelineRunner.processEnvironment(
+            base: [
+                "PATH": "/usr/bin",
+                "AUTONOVEL_API_KEY_FILE": KeychainSecretStore.sentinel,
+            ],
+            extra: ["AUTONOVEL_API_KEY": "from-keychain"],
+            pathPrepend: [uvDirectory]
+        )
+
+        XCTAssertTrue(environment["PATH"]?.hasPrefix(uvDirectory + ":") == true)
+        XCTAssertEqual(environment["PYTHONUNBUFFERED"], "1")
+        XCTAssertEqual(environment["AUTONOVEL_API_KEY"], "from-keychain")
+        XCTAssertNil(environment["AUTONOVEL_API_KEY_FILE"])
+    }
+
+    func testPipelineEnvironmentDoesNotInjectLeftoverKeychainSecretOutsideManagedKey() throws {
+        let secrets = MemorySecretStore()
+        try secrets.write("leftover-keychain-secret")
+        let store = EnvironmentFileStore(
+            projectURL: FileManager.default.temporaryDirectory,
+            secretStore: secrets
+        )
+
+        XCTAssertEqual(
+            store.pipelineEnvironment(credentialMode: .managedKey),
+            ["AUTONOVEL_API_KEY": "leftover-keychain-secret"]
+        )
+
+        for mode in CredentialMode.allCases where mode != .managedKey {
+            let extra = store.pipelineEnvironment(credentialMode: mode)
+            XCTAssertTrue(extra.isEmpty, "Unexpected extra environment for \(mode.rawValue)")
+            let environment = PipelineRunner.processEnvironment(
+                base: [
+                    "PATH": "/usr/bin",
+                    "AUTONOVEL_API_KEY_FILE": "/tmp/user.key",
+                ],
+                extra: extra
+            )
+            XCTAssertEqual(environment["AUTONOVEL_API_KEY_FILE"], "/tmp/user.key")
+            XCTAssertNil(environment["AUTONOVEL_API_KEY"])
+        }
+    }
+
+    func testOlderEmptyManagedKeyAssignmentIsRemovedWithoutAnotherSave() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-empty-key-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "AUTONOVEL_API_KEY_FILE=\(KeychainSecretStore.sentinel)\nAUTONOVEL_API_KEY=\nFAL_KEY=preserve-me\n".write(
+            to: root.appendingPathComponent(".env"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let secrets = MemorySecretStore()
+        try secrets.write("from-keychain")
+        let store = EnvironmentFileStore(projectURL: root, secretStore: secrets)
+        let loaded = store.load()
+        let extra = store.pipelineEnvironment(credentialMode: .managedKey)
+        let envText = try String(contentsOf: root.appendingPathComponent(".env"), encoding: .utf8)
+        let values = EnvironmentFileStore.values(in: envText)
+
+        XCTAssertEqual(loaded.credentialMode, .managedKey)
+        XCTAssertEqual(extra, ["AUTONOVEL_API_KEY": "from-keychain"])
+        XCTAssertNil(values["AUTONOVEL_API_KEY"])
+        XCTAssertFalse(envText.contains("AUTONOVEL_API_KEY="))
+        XCTAssertEqual(values["FAL_KEY"], "preserve-me")
+        XCTAssertEqual(values["AUTONOVEL_API_KEY_FILE"], KeychainSecretStore.sentinel)
+    }
+
+    @MainActor
+    func testFullPipelineResumesWhenCompleteUnverified() throws {
+        let draftingRoot = try makeReadyCompleteProject(
+            consecutiveChapters: 0,
+            chaptersTotal: 5,
+            novelScore: 11
+        )
+        defer { try? FileManager.default.removeItem(at: draftingRoot) }
+        let draftingStore = StudioStore(projectURL: draftingRoot)
+        XCTAssertTrue(draftingStore.seedIsReady)
+        XCTAssertEqual(draftingStore.loadBookBrief().requiredCompleted, 5)
+        XCTAssertFalse(draftingStore.completionIsVerified)
+        XCTAssertEqual(draftingStore.currentPhase, .drafting)
+        XCTAssertEqual(draftingStore.state.chaptersDrafted, 5)
+        XCTAssertEqual(try draftingStore.prepareFullPipelineArguments(), ["run_pipeline.py"])
+        XCTAssertFalse(draftingStore.runner.isRunning)
+        XCTAssertEqual(draftingStore.state.phase, "drafting")
+        XCTAssertEqual(draftingStore.state.chaptersDrafted, 0)
+        XCTAssertEqual(try pipelinePhase(in: draftingRoot), "drafting")
+        XCTAssertEqual(try loadedPipelineState(in: draftingRoot).chaptersDrafted, 0)
+        let draftingJSON = try stateJSON(in: draftingRoot)
+        XCTAssertTrue(draftingJSON.contains("\"chapters_total\""))
+        XCTAssertFalse(draftingJSON.contains("\"chaptersTotal\""))
+        XCTAssertTrue(draftingJSON.contains("\"novel_score\""))
+        XCTAssertFalse(draftingJSON.contains("\"novelScore\""))
+
+        let currentPhaseRoot = try makeReadyCompleteProject(
+            consecutiveChapters: 0,
+            chaptersTotal: 5,
+            novelScore: 11
+        )
+        defer { try? FileManager.default.removeItem(at: currentPhaseRoot) }
+        let currentPhaseStore = StudioStore(projectURL: currentPhaseRoot)
+        XCTAssertEqual(currentPhaseStore.currentPhase, .drafting)
+        XCTAssertEqual(currentPhaseStore.state.chaptersDrafted, 5)
+        try currentPhaseStore.persistUnverifiedCompleteResume()
+        XCTAssertFalse(currentPhaseStore.runner.isRunning)
+        XCTAssertEqual(currentPhaseStore.state.phase, "drafting")
+        XCTAssertEqual(currentPhaseStore.state.chaptersDrafted, 0)
+        XCTAssertEqual(try pipelinePhase(in: currentPhaseRoot), "drafting")
+        XCTAssertEqual(try loadedPipelineState(in: currentPhaseRoot).chaptersDrafted, 0)
+
+        let revisionRoot = try makeReadyCompleteProject(
+            consecutiveChapters: 5,
+            chaptersTotal: 5,
+            novelScore: 11
+        )
+        defer { try? FileManager.default.removeItem(at: revisionRoot) }
+        let revisionStore = StudioStore(projectURL: revisionRoot)
+        XCTAssertTrue(revisionStore.seedIsReady)
+        XCTAssertFalse(revisionStore.completionIsVerified)
+        XCTAssertEqual(revisionStore.actualDraftedChapters, 5)
+        XCTAssertEqual(revisionStore.currentPhase, .revision)
+        XCTAssertEqual(revisionStore.state.chaptersDrafted, 5)
+        XCTAssertEqual(try revisionStore.prepareFullPipelineArguments(), ["run_pipeline.py"])
+        XCTAssertFalse(revisionStore.runner.isRunning)
+        XCTAssertEqual(revisionStore.state.phase, "revision")
+        XCTAssertEqual(revisionStore.state.chaptersDrafted, 5)
+        XCTAssertEqual(try pipelinePhase(in: revisionRoot), "revision")
+        XCTAssertEqual(try loadedPipelineState(in: revisionRoot).chaptersDrafted, 5)
+
+        let verifiedRoot = try makeReadyCompleteProject(
+            consecutiveChapters: 5,
+            chaptersTotal: 5,
+            novelScore: 8
+        )
+        defer { try? FileManager.default.removeItem(at: verifiedRoot) }
+        let verifiedStore = StudioStore(projectURL: verifiedRoot)
+        XCTAssertTrue(verifiedStore.seedIsReady)
+        XCTAssertTrue(verifiedStore.completionIsVerified)
+        XCTAssertEqual(verifiedStore.currentPhase, .complete)
+        XCTAssertEqual(try verifiedStore.prepareFullPipelineArguments(), ["run_pipeline.py"])
+        XCTAssertFalse(verifiedStore.runner.isRunning)
+        XCTAssertEqual(verifiedStore.state.phase, "complete")
+        XCTAssertEqual(try pipelinePhase(in: verifiedRoot), "complete")
     }
 
     func testKeychainRoundTripWhenAvailable() throws {
@@ -234,5 +719,63 @@ final class AutoNovelStudioTests: XCTestCase {
         }
         defer { try? store.delete() }
         XCTAssertEqual(try store.read(), "round-trip-secret")
+    }
+
+    private func makeReadyCompleteProject(
+        consecutiveChapters: Int,
+        chaptersTotal: Int,
+        novelScore: Double
+    ) throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-full-run-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        var brief = BookBrief()
+        brief.title = "The Glass Cartographer"
+        brief.premise = "A mapmaker discovers that erased roads still remember their travelers."
+        brief.protagonist = "Mara, an exacting apprentice who cannot get lost."
+        brief.centralConflict = "The royal surveyor is deleting rebellious towns from reality."
+        brief.worldHook = "Maps determine which places can physically exist."
+        XCTAssertEqual(brief.requiredCompleted, 5)
+        try JSONEncoder().encode(brief).write(to: root.appendingPathComponent("book.json"))
+        try (brief.seedText + "\n").write(
+            to: root.appendingPathComponent("seed.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let stateJSON = """
+        {"phase":"complete","status":"complete","chapters_drafted":\(chaptersTotal),"chapters_total":\(chaptersTotal),"novel_score":\(novelScore)}
+        """
+        try Data(stateJSON.utf8).write(to: root.appendingPathComponent("state.json"))
+
+        if consecutiveChapters > 0 {
+            let chapters = root.appendingPathComponent("chapters", isDirectory: true)
+            try FileManager.default.createDirectory(at: chapters, withIntermediateDirectories: true)
+            for number in 1...consecutiveChapters {
+                let name = String(format: "ch_%02d.md", number)
+                try "Chapter \(number) has enough words to count.\n".write(
+                    to: chapters.appendingPathComponent(name),
+                    atomically: true,
+                    encoding: .utf8
+                )
+            }
+        }
+        return root
+    }
+
+    private func stateJSON(in root: URL) throws -> String {
+        try String(contentsOf: root.appendingPathComponent("state.json"), encoding: .utf8)
+    }
+
+    private func loadedPipelineState(in root: URL) throws -> PipelineState {
+        try JSONDecoder().decode(
+            PipelineState.self,
+            from: Data(contentsOf: root.appendingPathComponent("state.json"))
+        )
+    }
+
+    private func pipelinePhase(in root: URL) throws -> String {
+        try loadedPipelineState(in: root).phase
     }
 }

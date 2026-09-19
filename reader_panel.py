@@ -9,12 +9,11 @@ Usage: python reader_panel.py
 import os
 import sys
 import json
-import re
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
-from book_config import chapter_numbers, load_book
-from llm_client import call_llm
+from book_config import chapter_numbers, extract_mentioned_chapters, load_book
+from llm_client import call_llm, parse_json_response
 
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env")
@@ -132,28 +131,7 @@ def call_reader(reader_key, arc_summary):
         timeout=300,
     )
     
-    # Parse JSON
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = re.sub(r'^```\w*\n?', '', raw)
-        raw = re.sub(r'\n?```$', '', raw)
-    start = raw.find('{')
-    if start >= 0:
-        depth = 0
-        in_string = False
-        escape = False
-        for i in range(start, len(raw)):
-            c = raw[i]
-            if escape: escape = False; continue
-            if c == '\\' and in_string: escape = True; continue
-            if c == '"' and not escape: in_string = not in_string; continue
-            if in_string: continue
-            if c == '{': depth += 1
-            elif c == '}':
-                depth -= 1
-                if depth == 0:
-                    return json.loads(raw[start:i+1], strict=False)
-    return json.loads(raw, strict=False)
+    return parse_json_response(raw)
 
 def find_disagreements(results):
     """Find where readers disagree -- that's where the editorial decisions live."""
@@ -164,7 +142,7 @@ def find_disagreements(results):
         # Extract chapter numbers mentioned
         chapters_mentioned = {}
         for reader, answer in answers.items():
-            chs = set(re.findall(r'Ch(?:apter)?\s*(\d+)', answer, re.IGNORECASE))
+            chs = set(extract_mentioned_chapters(answer))
             chapters_mentioned[reader] = chs
         
         # Find chapters where only some readers flagged an issue
@@ -187,7 +165,10 @@ def find_disagreements(results):
     return disagreements
 
 def main():
-    arc_summary = (BASE_DIR / "arc_summary.md").read_text()
+    arc_path = BASE_DIR / "arc_summary.md"
+    if not arc_path.exists():
+        sys.exit("ERROR: arc_summary.md not found. Run build_arc_summary.py first.")
+    arc_summary = arc_path.read_text()
     
     results = {}
     for reader_key, reader_info in READERS.items():
@@ -205,6 +186,9 @@ def main():
             print(f"  Would recommend: {result.get('would_recommend', '')[:150]}...")
         except Exception as e:
             print(f"  ERROR: {e}")
+
+    if not results:
+        sys.exit("ERROR: all readers failed; no panel results.")
     
     # Find disagreements
     disagreements = find_disagreements(results)

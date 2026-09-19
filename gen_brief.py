@@ -7,6 +7,7 @@ Usage:
   python gen_brief.py --panel 12    # brief from panel feedback for ch 12
   python gen_brief.py --eval 12     # brief from eval callouts for ch 12
   python gen_brief.py --cuts 12     # brief from adversarial cuts for ch 12
+  python gen_brief.py --review 12   # brief from professor review items for ch 12
   python gen_brief.py --auto        # auto-detect weakest chapter and generate
 """
 import argparse
@@ -14,6 +15,9 @@ import json
 import re
 import sys
 from pathlib import Path
+
+from book_config import extract_mentioned_chapters
+from voice_parse import parse_voice_rules
 
 BASE_DIR = Path(__file__).parent
 CHAPTERS_DIR = BASE_DIR / "chapters"
@@ -65,24 +69,8 @@ def extract_voice_rules() -> list[str]:
     """Pull the key guardrail / voice rules from voice.md Part 1 + Part 2."""
     if not VOICE_PATH.exists():
         return ["(voice.md not found)"]
-    voice = VOICE_PATH.read_text(encoding="utf-8")
-
-    rules: list[str] = []
-
-    # Part 2 identity rules we always want
-    rules.append("Body-first emotion (jaw, ribs, tongue before naming the feeling)")
-    rules.append("No telling after showing")
-    rules.append("No triadic sensory lists")
-    rules.append("70%+ in-scene (dialogue and action, not summary)")
-    rules.append("Dialogue: clipped, subtext-heavy, 'said' default, no adverb tags")
-    rules.append("Sentence rhythm: mixed meter, fragments for pain, long for perception")
-    rules.append("Vocabulary from craft/trade/body wells — no generic fantasy diction")
-
-    # Part 1 structural slop
-    rules.append("No paragraph-template-machine (vary structure)")
-    rules.append("Max 1-2 em dashes per page")
-
-    return rules
+    rules = parse_voice_rules(VOICE_PATH.read_text(encoding="utf-8"))
+    return rules or ["(no voice rules found in voice.md)"]
 
 
 def latest_full_eval() -> Path | None:
@@ -117,6 +105,35 @@ def load_cuts(ch: int) -> dict | None:
     if not p.exists():
         return None
     return load_json(p)
+
+
+def latest_review() -> Path | None:
+    """Find the most recent *_review.json in edit_logs/."""
+    if not EDIT_LOGS_DIR.exists():
+        return None
+    reviews = sorted(EDIT_LOGS_DIR.glob("*_review.json"))
+    return reviews[-1] if reviews else None
+
+
+def professor_item_blob(item: dict) -> str:
+    return " ".join(
+        str(item.get(key) or "") for key in ("title", "full_text", "suggestion")
+    )
+
+
+def chapter_from_professor_item(item: dict) -> int | None:
+    """Extract a chapter number from a professor review item."""
+    chapters = extract_mentioned_chapters(professor_item_blob(item))
+    return chapters[0] if chapters else None
+
+
+def professor_items_for_chapter(review: dict, ch: int) -> list[dict]:
+    """Filter professor_items that mention chapter CH (word-boundary Ch/Chapter)."""
+    ch_re = re.compile(rf"\b(?:Chapter|Ch\.?)\s*{ch}\b", re.I)
+    return [
+        item for item in review.get("professor_items", [])
+        if ch_re.search(professor_item_blob(item))
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -603,6 +620,56 @@ def build_cuts_brief(ch: int) -> str:
     return brief
 
 
+def build_review_brief(ch: int) -> str:
+    """Build a revision brief from latest *_review.json professor_items."""
+    review_path = latest_review()
+    if review_path is None:
+        sys.exit("ERROR: no *_review.json found in edit_logs/")
+
+    review = load_json(review_path)
+    items = professor_items_for_chapter(review, ch)
+    if not items:
+        sys.exit(f"ERROR: no professor_items mention Chapter {ch}")
+
+    text = chapter_text(ch)
+    title = chapter_title(text)
+    wc = word_count(text)
+    voice_rules = extract_voice_rules()
+
+    problem_parts: list[str] = [
+        f"Professor review flagged **{len(items)}** item(s) for Chapter {ch} "
+        f"(source: {review_path.name})."
+    ]
+    change_parts: list[str] = []
+    for i, item in enumerate(items, start=1):
+        severity = item.get("severity", "unspecified")
+        qualified = " [qualified]" if item.get("qualified") else ""
+        heading = item.get("title") or f"Item {item.get('number', i)}"
+        problem_parts.append(f"- [{severity}]{qualified} {heading}")
+        suggestion = (
+            item.get("suggestion") or item.get("full_text") or heading
+        )
+        change_parts.append(f"{i}. **{heading}**: {suggestion}")
+
+    keep_parts = [
+        "(Preserve voice, character work, and beats the review does not challenge.)"
+    ]
+    target_note = f"~{wc} words (current: {wc}; adjust based on review scope)"
+
+    brief = f"# Revision Brief: Chapter {ch} — {title} (REVIEW)\n\n"
+    brief += "## PROBLEM\n"
+    brief += "\n".join(problem_parts) + "\n\n"
+    brief += "## WHAT TO KEEP\n"
+    brief += "\n".join(keep_parts) + "\n\n"
+    brief += "## WHAT TO CHANGE\n"
+    brief += "\n".join(change_parts) + "\n\n"
+    brief += "## VOICE RULES\n"
+    brief += "\n".join(f"- {r}" for r in voice_rules) + "\n\n"
+    brief += "## TARGET\n"
+    brief += target_note + "\n"
+    return brief
+
+
 def build_auto_brief() -> tuple[int, str]:
     """Auto-detect weakest chapter and build a combined brief."""
     full_eval_path = latest_full_eval()
@@ -798,6 +865,9 @@ def main():
                         help="Generate brief from eval callouts for chapter CH")
     parser.add_argument("--cuts", type=int, metavar="CH",
                         help="Generate brief from adversarial cuts for chapter CH")
+    parser.add_argument("--review", type=int, nargs="?", const=0, metavar="CH",
+                        help="Generate brief from latest review professor_items "
+                             "(optionally for chapter CH)")
     parser.add_argument("--auto", action="store_true",
                         help="Auto-detect weakest chapter and generate combined brief")
     parser.add_argument("--dry-run", action="store_true",
@@ -810,13 +880,16 @@ def main():
         args.panel is not None,
         args.eval is not None,
         args.cuts is not None,
+        args.review is not None,
         args.auto,
     ])
     if modes == 0:
         parser.print_help()
         sys.exit(1)
     if modes > 1:
-        sys.exit("ERROR: specify exactly one of --panel, --eval, --cuts, --auto")
+        sys.exit(
+            "ERROR: specify exactly one of --panel, --eval, --cuts, --review, --auto"
+        )
 
     # Generate
     if args.panel is not None:
@@ -831,6 +904,22 @@ def main():
         ch = args.cuts
         brief_text = build_cuts_brief(ch)
         suffix = "cuts"
+    elif args.review is not None:
+        ch = args.review
+        if not ch:
+            review_path = latest_review()
+            if review_path is None:
+                sys.exit("ERROR: no *_review.json found in edit_logs/")
+            review = load_json(review_path)
+            ch = None
+            for item in review.get("professor_items", []):
+                ch = chapter_from_professor_item(item)
+                if ch is not None:
+                    break
+            if ch is None:
+                sys.exit("ERROR: no chapter mentioned in professor_items")
+        brief_text = build_review_brief(ch)
+        suffix = "review"
     else:  # --auto
         ch, brief_text = build_auto_brief()
         suffix = "auto"
