@@ -12,46 +12,62 @@ struct ContentView: View {
             detail
                 .id(store.selection)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(nsColor: .windowBackgroundColor))
         }
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                if store.runner.isRunning {
-                    StatusPill(text: store.runner.label, color: StudioTheme.amber, animated: true)
-                    Button("Stop", systemImage: "stop.fill") { store.runner.stop() }
-                } else {
-                    StatusPill(
-                        text: store.hasPipelineFailure ? "Needs attention" : "Ready",
-                        color: store.hasPipelineFailure ? .red : StudioTheme.moss
-                    )
-                    Button("Check Connection", systemImage: "bolt.horizontal.circle") {
-                        store.runModelCheck()
-                    }
-                    .help("Check Connection")
-                    .disabled(store.runner.isRunning)
-                }
-            }
+            primaryToolbar
         }
         .overlay {
             if store.showHelp {
-                ZStack {
-                    Color.black.opacity(reduceMotion ? 0.18 : 0.28)
-                        .ignoresSafeArea()
-                        .onTapGesture { store.showHelp = false }
-                    StudioHelpView(onClose: { store.showHelp = false })
-                        .background(Color(nsColor: .windowBackgroundColor))
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .shadow(color: reduceMotion ? .clear : .black.opacity(0.28), radius: reduceMotion ? 0 : 28, y: reduceMotion ? 0 : 10)
-                        .padding(36)
-                }
-                .accessibilityAddTraits(.isModal)
-                .onKeyPress(.escape) {
-                    store.showHelp = false
-                    return .handled
-                }
-                .onExitCommand { store.showHelp = false }
+                helpOverlay
             }
         }
+    }
+
+    @ToolbarContentBuilder
+    private var primaryToolbar: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            if store.runner.isRunning {
+                StatusPill(text: store.runner.label, color: StudioTheme.amber, animated: true)
+            } else {
+                StatusPill(
+                    text: store.hasPipelineFailure ? "Needs attention" : "Ready",
+                    color: store.hasPipelineFailure ? .red : StudioTheme.moss
+                )
+            }
+        }
+
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
+
+        ToolbarItemGroup(placement: .primaryAction) {
+            if store.runner.isRunning {
+                Button("Stop", systemImage: "stop.fill") { store.runner.stop() }
+            } else {
+                Button("Check Connection", systemImage: "bolt.horizontal.circle") {
+                    store.runModelCheck()
+                }
+                .help("Check Connection")
+                .disabled(store.runner.isRunning)
+            }
+        }
+    }
+
+    private var helpOverlay: some View {
+        ZStack {
+            Color.black.opacity(reduceMotion ? 0.10 : 0.16)
+                .ignoresSafeArea()
+                .onTapGesture { store.showHelp = false }
+            StudioHelpView(onClose: { store.showHelp = false })
+                .modifier(StudioGlassPanel(cornerRadius: 16))
+                .padding(36)
+        }
+        .accessibilityAddTraits(.isModal)
+        .onKeyPress(.escape) {
+            store.showHelp = false
+            return .handled
+        }
+        .onExitCommand { store.showHelp = false }
     }
 
     @ViewBuilder
@@ -67,11 +83,29 @@ struct ContentView: View {
             AdvancedDocumentsView(store: store)
         case .activity:
             ActivityView(store: store)
-        default:
+        case .seed, .world, .characters, .voice, .outline, .canon, .mystery:
             if let document = BookDocument.forSection(store.selection) {
                 DocumentEditorView(store: store, document: document)
                     .id(document.id)
             }
+        }
+    }
+}
+
+/// Custom help surface: system glass on macOS 26+, adaptive material below.
+private struct StudioGlassPanel: ViewModifier {
+    var cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        if #available(macOS 26.0, *) {
+            content
+                .glassEffect(.regular, in: shape)
+        } else {
+            content
+                .background(.regularMaterial, in: shape)
+                .clipShape(shape)
+                .shadow(color: .black.opacity(0.18), radius: 22, y: 8)
         }
     }
 }

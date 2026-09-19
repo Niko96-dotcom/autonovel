@@ -56,8 +56,7 @@ struct StatusPill: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.primary)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(.quaternary, in: Capsule())
+        // No capsule fill — toolbar Liquid Glass (and plain content chrome) stay un-skinned.
+        .accessibilityElement(children: .combine)
     }
 }

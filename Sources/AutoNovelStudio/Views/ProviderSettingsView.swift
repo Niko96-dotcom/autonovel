@@ -5,13 +5,6 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
     case about
 
     var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .provider: "Provider"
-        case .about: "About"
-        }
-    }
 }
 
 struct ProviderSettingsView: View {
@@ -24,40 +17,30 @@ struct ProviderSettingsView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        NavigationStack {
-            Group {
-                switch pane {
-                case .provider:
-                    providerScroll
-                case .about:
-                    aboutView
+        TabView(selection: $pane) {
+            providerScroll
+                .tabItem { Label("Provider", systemImage: "slider.horizontal.3") }
+                .tag(SettingsPane.provider)
+
+            aboutView
+                .tabItem { Label("About", systemImage: "info.circle") }
+                .tag(SettingsPane.about)
+        }
+        .frame(minWidth: 560, idealWidth: 640, minHeight: 540, idealHeight: 720)
+        .scenePadding()
+        .toolbar {
+            if pane == .provider {
+                ToolbarItem(placement: .automatic) {
+                    Button("Save") { save() }
                 }
-            }
-            .navigationTitle(pane.title)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Picker("Settings pane", selection: $pane) {
-                        ForEach(SettingsPane.allCases) { item in
-                            Text(item.title).tag(item)
-                        }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save & Check Connection") {
+                        if save() { store.runModelCheck() }
                     }
-                    .pickerStyle(.segmented)
-                    .frame(minWidth: 220)
-                }
-                if pane == .provider {
-                    ToolbarItem(placement: .automatic) {
-                        Button("Save") { save() }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Save & Check Connection") {
-                            if save() { store.runModelCheck() }
-                        }
-                        .disabled(store.runner.isRunning)
-                    }
+                    .disabled(store.runner.isRunning)
                 }
             }
         }
-        .frame(minWidth: 560, idealWidth: 640, minHeight: 540, idealHeight: 720)
         .focusedValue(\.studioSaveAction, pane == .provider ? { save() } : nil)
         .task {
             store.reloadProviderConfiguration()

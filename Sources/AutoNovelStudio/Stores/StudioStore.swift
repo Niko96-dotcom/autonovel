@@ -8,7 +8,14 @@ final class StudioStore {
     let runner: PipelineRunner
     private let environmentStore: EnvironmentFileStore
 
-    var selection: StudioSection = .overview
+    var selection: StudioSection = .overview {
+        didSet {
+            guard selection != oldValue else { return }
+            StudioLog.sidebar.info(
+                "Selected sidebar item: \(self.selection.rawValue, privacy: .public)"
+            )
+        }
+    }
     var showHelp = false
     private(set) var state = PipelineState()
     private(set) var chapters: [ChapterInfo] = []
@@ -100,6 +107,7 @@ final class StudioStore {
 
     func startMonitoring() {
         guard monitorTask == nil else { return }
+        StudioLog.pipeline.info("Started pipeline state monitoring")
         monitorTask = Task { [weak self] in
             while !Task.isCancelled {
                 self?.refresh()
@@ -200,6 +208,9 @@ final class StudioStore {
             try persistUnverifiedCompleteResume()
         } catch {
             refreshError = error.localizedDescription
+            StudioLog.pipeline.error(
+                "Failed to prepare current phase: \(error.localizedDescription, privacy: .public)"
+            )
             return
         }
         runner.run(
@@ -214,6 +225,9 @@ final class StudioStore {
             try persistUnverifiedCompleteResume()
         } catch {
             refreshError = error.localizedDescription
+            StudioLog.pipeline.error(
+                "Failed to prepare full pipeline: \(error.localizedDescription, privacy: .public)"
+            )
             return
         }
         runner.run(

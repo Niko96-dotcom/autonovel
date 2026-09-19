@@ -22,10 +22,17 @@ extension FocusedValues {
 
 struct StudioCommands: Commands {
     @Bindable var store: StudioStore
+    @Environment(\.openWindow) private var openWindow
     @FocusedValue(\.studioSaveAction) private var saveAction
 
     var body: some Commands {
         CommandGroup(after: .newItem) {
+            Button("New Window") {
+                StudioLog.windowing.info("Opening new studio window")
+                openWindow(id: "studio-main")
+            }
+            .keyboardShortcut("n")
+
             Button("Save") { saveAction?() }
                 .keyboardShortcut("s")
                 .disabled(saveAction == nil)
@@ -58,11 +65,18 @@ struct StudioCommands: Commands {
 
 enum StudioWindowHygiene {
     static func closePlaceholderWindows() {
+        var closed = 0
         for window in NSApp.windows {
             guard shouldClose(window) else { continue }
             window.ignoresMouseEvents = true
             window.orderOut(nil)
             window.close()
+            closed += 1
+        }
+        if closed > 0 {
+            StudioLog.windowing.info(
+                "Closed \(closed, privacy: .public) placeholder window(s)"
+            )
         }
     }
 

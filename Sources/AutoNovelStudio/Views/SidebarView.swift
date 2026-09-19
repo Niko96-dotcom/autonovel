@@ -54,7 +54,7 @@ struct SidebarView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(.bar)
+        // No opaque/.bar fill — let NavigationSplitView sidebar Liquid Glass show through.
         .help(store.projectURL.path)
     }
 

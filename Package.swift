@@ -16,7 +16,7 @@ let package = Package(
         .testTarget(
             name: "AutoNovelStudioTests",
             dependencies: ["AutoNovelStudio"],
-            path: "Tests/AutoNovelStudioTests"
+            path: "tests/AutoNovelStudioTests"
         ),
     ]
 )
