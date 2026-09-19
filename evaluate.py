@@ -27,6 +27,7 @@ BASE_DIR = Path(__file__).parent
 
 # Load .env file if present
 from dotenv import load_dotenv
+from book_config import extract_outline_entry
 from llm_client import call_llm, parse_json_response
 load_dotenv(BASE_DIR / ".env")
 
@@ -621,11 +622,9 @@ def evaluate_chapter(chapter_num):
         return {"error": f"Chapter {chapter_num} is empty or missing",
                 "overall_score": 0.0}
 
-    # Extract this chapter's outline entry (rough heuristic)
+    # Extract this chapter's outline entry
     outline = layers["outline"]
-    ch_pattern = rf'###\s*Ch\s*{chapter_num}\b.*?(?=###\s*Ch\s*\d|## Act|## Foreshadowing|$)'
-    ch_match = re.search(ch_pattern, outline, re.DOTALL)
-    chapter_outline = ch_match.group(0) if ch_match else "(outline entry not found)"
+    chapter_outline = extract_outline_entry(outline, chapter_num) or "(outline entry not found)"
 
     # Load previous chapter tail
     prev_text = load_chapter(chapter_num - 1) if chapter_num > 1 else "(first chapter)"

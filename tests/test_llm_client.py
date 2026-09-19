@@ -1,9 +1,13 @@
 import os
+import sys
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import llm_client
+
+# Bare `python3 -m pytest` does not install project deps.
+sys.modules.setdefault("dotenv", MagicMock())
 
 
 class LLMClientTests(unittest.TestCase):
@@ -73,11 +77,12 @@ class LLMClientTests(unittest.TestCase):
             key_path.write_text("file-key\n")
             env = {
                 "AUTONOVEL_LLM_PROVIDER": "openai",
-                "AUTONOVEL_API_BASE_URL": "http://localhost:8081",
+                "AUTONOVEL_API_BASE_URL": "https://models.example.org/v1",
                 "AUTONOVEL_API_KEY_FILE": str(key_path),
             }
             with patch.dict(os.environ, env, clear=True):
                 self.assertIsNone(llm_client.configuration_error())
+                self.assertEqual(llm_client._api_key(), "file-key")
 
     @patch.dict(
         os.environ,
@@ -177,6 +182,47 @@ class LLMClientTests(unittest.TestCase):
     def test_default_anthropic_keeps_short_pipeline_timeouts(self):
         self.assertFalse(llm_client.is_local_openai_backend())
         self.assertEqual(llm_client.pipeline_timeouts(), (600, 1800))
+
+
+class CheckLLMWriterModelTests(unittest.TestCase):
+    _READY_ENV = {
+        "AUTONOVEL_LLM_PROVIDER": "openai",
+        "AUTONOVEL_API_BASE_URL": "http://127.0.0.1:8081/v1",
+        "AUTONOVEL_API_KEY": "local-test-key",
+    }
+
+    @patch.dict(os.environ, _READY_ENV, clear=True)
+    @patch("check_llm.call_llm")
+    def test_absent_writer_model_uses_gen_voice_default(self, call_llm):
+        import importlib
+
+        import check_llm
+        import gen_voice
+
+        self.assertNotIn("AUTONOVEL_WRITER_MODEL", os.environ)
+        gen_voice = importlib.reload(gen_voice)
+        call_llm.return_value = "AUTONOVEL_LOCAL_OK"
+
+        rc = check_llm.main()
+
+        self.assertEqual(rc, 0)
+        model = call_llm.call_args.kwargs["model"]
+        self.assertTrue(model)
+        self.assertEqual(model, gen_voice.WRITER_MODEL)
+
+    @patch.dict(
+        os.environ,
+        {**_READY_ENV, "AUTONOVEL_WRITER_MODEL": "  "},
+        clear=True,
+    )
+    @patch("check_llm.call_llm")
+    def test_blank_writer_model_refuses_call_llm(self, call_llm):
+        import check_llm
+
+        rc = check_llm.main()
+
+        self.assertEqual(rc, 1)
+        call_llm.assert_not_called()
 
 
 class ParseJSONResponseTests(unittest.TestCase):

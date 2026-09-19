@@ -40,6 +40,7 @@ and an eight-dimension speech profile with two original example lines. Supportin
 may be shorter but still need a goal and distinctive behavior.
 
 Requirements:
+- Start each character with a level-2 heading: `## Name (POV)` or `## Name (non-POV)`.
 - Preserve names and identity choices supplied in the Story Seed.
 - Make wants collide; no character exists only to deliver information.
 - Give opposing characters defensible inner logic rather than making them generic villains.

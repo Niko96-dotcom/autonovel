@@ -9,11 +9,10 @@ Usage: python reader_panel.py
 import os
 import sys
 import json
-import re
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
-from book_config import chapter_numbers, load_book
+from book_config import chapter_numbers, extract_mentioned_chapters, load_book
 from llm_client import call_llm, parse_json_response
 
 BASE_DIR = Path(__file__).parent
@@ -143,7 +142,7 @@ def find_disagreements(results):
         # Extract chapter numbers mentioned
         chapters_mentioned = {}
         for reader, answer in answers.items():
-            chs = set(re.findall(r'Ch(?:apter)?\s*(\d+)', answer, re.IGNORECASE))
+            chs = set(extract_mentioned_chapters(answer))
             chapters_mentioned[reader] = chs
         
         # Find chapters where only some readers flagged an issue
@@ -187,6 +186,9 @@ def main():
             print(f"  Would recommend: {result.get('would_recommend', '')[:150]}...")
         except Exception as e:
             print(f"  ERROR: {e}")
+
+    if not results:
+        sys.exit("ERROR: all readers failed; no panel results.")
     
     # Find disagreements
     disagreements = find_disagreements(results)

@@ -71,6 +71,39 @@ def chapter_numbers() -> list[int]:
     return sorted(numbers)
 
 
+# Same heading shape get_total_chapters counts: ### Ch N / ### Chapter N.
+CHAPTER_HEADING_RE = re.compile(r"###\s*Ch(?:apter)?\s*(\d+)")
+# Word-boundary Chapter/Ch/Ch. N — does not match "which 2" or "such 5".
+CHAPTER_MENTION_RE = re.compile(r"\b(?:Chapter|Ch\.?)\s*(\d+)\b", re.IGNORECASE)
+
+
+def extract_mentioned_chapters(text: str) -> list[int]:
+    """Return chapter numbers mentioned as Chapter N, Ch N, or Ch. N."""
+    if not isinstance(text, str):
+        return []
+    return [int(num) for num in CHAPTER_MENTION_RE.findall(text)]
+
+
+def extract_outline_entry(outline_text: str, chapter_num: int) -> str:
+    """Return one chapter's outline block, or '' if that heading is absent.
+
+    Stops at the next ### Ch(apter) heading of any number, ## Foreshadowing, or EOF.
+    """
+    matches = list(CHAPTER_HEADING_RE.finditer(outline_text))
+    chapter_num = int(chapter_num)
+    for index, match in enumerate(matches):
+        if int(match.group(1)) != chapter_num:
+            continue
+        start = match.start()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(outline_text)
+        block = outline_text[start:end]
+        foreshadow = re.search(r"## Foreshadowing", block)
+        if foreshadow:
+            block = block[: foreshadow.start()]
+        return block.strip()
+    return ""
+
+
 def voice_identity(voice: str) -> str:
     """Return Part 2 when present, otherwise the full voice document."""
     lines = voice.splitlines()

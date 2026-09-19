@@ -14,6 +14,7 @@ import random
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
+from book_config import chapter_numbers
 from llm_client import call_llm, parse_json_response
 
 BASE_DIR = Path(__file__).parent
@@ -155,7 +156,7 @@ def main():
         print(json.dumps(result, indent=2))
     else:
         # Full tournament
-        chapters = list(range(1, 25))
+        chapters = chapter_numbers()
         ranking, elo, matchups = run_tournament(chapters)
         
         print(f"\n{'='*50}")

@@ -45,11 +45,20 @@ def find_and_remove(text: str, quote: str) -> tuple[str, bool, str]:
 
     Returns (new_text, success, failure_reason).
     """
+    return _find_and_substitute(text, quote, "")
+
+
+def find_and_replace(text: str, quote: str, replacement: str) -> tuple[str, bool, str]:
+    """Find quote with the same locate rules as find_and_remove, then substitute."""
+    return _find_and_substitute(text, quote, replacement)
+
+
+def _find_and_substitute(text: str, quote: str, replacement: str) -> tuple[str, bool, str]:
+    """Locate a unique quote span and replace it (empty replacement deletes)."""
     # Exact match first
     count = text.count(quote)
     if count == 1:
-        text = text.replace(quote, "", 1)
-        return text, True, ""
+        return text.replace(quote, replacement, 1), True, ""
     if count > 1:
         return text, False, f"ambiguous ({count} matches)"
 
@@ -68,8 +77,7 @@ def find_and_remove(text: str, quote: str) -> tuple[str, bool, str]:
     matches = list(re.finditer(pattern, text))
     if len(matches) == 1:
         m = matches[0]
-        text = text[:m.start()] + text[m.end():]
-        return text, True, ""
+        return text[:m.start()] + replacement + text[m.end():], True, ""
     if len(matches) > 1:
         return text, False, f"ambiguous after ws-norm ({len(matches)} matches)"
 
@@ -131,6 +139,10 @@ def process_chapter(
         quote = cut.get("quote", "")
         cut_type = cut.get("type", "UNKNOWN")
         reason = cut.get("reason", "")
+        action = str(cut.get("action") or "CUT").strip().upper()
+        raw_rewrite = cut.get("rewrite")
+        rewrite = raw_rewrite.strip() if isinstance(raw_rewrite, str) else ""
+        is_replace = action == "REWRITE"
 
         # Filter by type
         if type_filter and cut_type not in type_filter:
@@ -144,28 +156,44 @@ def process_chapter(
                 print(f"  SKIP [{cut_type}] quote too short ({len(quote.strip())} chars)")
             continue
 
+        # REWRITE without replacement text must not delete the span
+        if is_replace and not rewrite:
+            stats["skipped"] += 1
+            if not dry_run:
+                print(f"  SKIP [{cut_type}] REWRITE with empty rewrite")
+            continue
+
+        verb = "REPLACE" if is_replace else "CUT"
+
         if dry_run:
             preview = quote[:80].replace("\n", "\\n")
             if len(quote) > 80:
                 preview += "..."
             words = len(quote.split())
-            print(f"  CUT  [{cut_type}] ~{words}w: {preview}")
+            print(f"  {verb:<7} [{cut_type}] ~{words}w: {preview}")
             print(f"        reason: {reason}")
             stats["applied"] += 1
-            stats["words_removed"] += words
+            if is_replace:
+                stats["words_removed"] += max(0, words - len(rewrite.split()))
+            else:
+                stats["words_removed"] += words
             continue
 
-        # Apply the cut
-        new_text, success, fail_reason = find_and_remove(text, quote)
+        if is_replace:
+            new_text, success, fail_reason = find_and_replace(text, quote, rewrite)
+        else:
+            new_text, success, fail_reason = find_and_remove(text, quote)
         if success:
             words_cut = len(quote.split())
+            if is_replace:
+                words_cut = max(0, words_cut - len(rewrite.split()))
             stats["applied"] += 1
             stats["words_removed"] += words_cut
             text = new_text
             preview = quote[:60].replace("\n", "\\n")
             if len(quote) > 60:
                 preview += "..."
-            print(f"  CUT  [{cut_type}] ~{words_cut}w: {preview}")
+            print(f"  {verb:<7} [{cut_type}] ~{words_cut}w: {preview}")
         else:
             stats["failed"] += 1
             preview = quote[:60].replace("\n", "\\n")

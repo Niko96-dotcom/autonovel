@@ -4,11 +4,10 @@ Draft a single chapter using the writer model.
 Usage: python draft_chapter.py 1
 """
 import os
-import re
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
-from book_config import load_book, load_seed, target_words_per_chapter
+from book_config import extract_outline_entry, load_book, load_seed, target_words_per_chapter
 from llm_client import call_llm
 
 BASE_DIR = Path(__file__).parent
@@ -42,9 +41,7 @@ def load_file(path):
 
 def extract_chapter_outline(outline_text, chapter_num):
     """Extract a specific chapter's outline entry."""
-    pattern = rf'### Ch {chapter_num}:.*?(?=### Ch {chapter_num + 1}:|## Foreshadowing|$)'
-    match = re.search(pattern, outline_text, re.DOTALL)
-    return match.group(0).strip() if match else "(not found)"
+    return extract_outline_entry(outline_text, chapter_num) or "(not found)"
 
 def extract_next_chapter_outline(outline_text, chapter_num):
     """Extract the next chapter's outline (just first few lines for continuity)."""
@@ -102,6 +99,9 @@ WORLD BIBLE (reference for worldbuilding details):
 CHARACTER REGISTRY (reference for speech patterns and behavior):
 {characters}
 
+CANON (established hard facts -- violations are bugs):
+{canon}
+
 WRITING INSTRUCTIONS:
 1. Write the COMPLETE chapter. Target approximately {chapter_target:,} words. Do not truncate or summarize.
 2. Use {book['pointOfView']} and {book['tense']}. Follow the POV named for this chapter in the outline.
@@ -150,6 +150,7 @@ Write the chapter now. Full text, beginning to end.
     result = call_writer(prompt)
     
     # Save
+    CHAPTERS_DIR.mkdir(parents=True, exist_ok=True)
     out_path = CHAPTERS_DIR / f"ch_{chapter_num:02d}.md"
     out_path.write_text(result)
     print(f"Saved to {out_path}", file=sys.stderr)

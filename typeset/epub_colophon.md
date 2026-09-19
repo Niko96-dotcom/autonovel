@@ -8,8 +8,4 @@ title: ""
 
 \
 
-*https://example.com*
-
-\
-
-![ ](epub_back_cover.png)
+*https://nousresearch.com/bells*

@@ -11,6 +11,7 @@ import sys
 import json
 from pathlib import Path
 from dotenv import load_dotenv
+from book_config import chapter_numbers
 from llm_client import call_llm, parse_json_response
 
 BASE_DIR = Path(__file__).parent
@@ -101,7 +102,7 @@ def main():
         sys.exit(1)
     
     if sys.argv[1] == "all":
-        chapters = list(range(1, 25))
+        chapters = chapter_numbers()
     else:
         chapters = [int(sys.argv[1])]
     

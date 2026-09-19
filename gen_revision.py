@@ -39,6 +39,11 @@ def main():
     voice = (BASE_DIR / "voice.md").read_text()
     characters = (BASE_DIR / "characters.md").read_text()
     world = (BASE_DIR / "world.md").read_text()
+    canon_path = BASE_DIR / "canon.md"
+    try:
+        canon = canon_path.read_text()
+    except FileNotFoundError:
+        canon = ""
     brief = Path(brief_file).read_text()
     
     # Load adjacent chapters for continuity
@@ -67,6 +72,9 @@ CHARACTER REGISTRY:
 
 WORLD BIBLE:
 {world}
+
+CANON (established hard facts -- violations are bugs):
+{canon}
 
 PREVIOUS CHAPTER ENDING (maintain continuity):
 {prev_tail}

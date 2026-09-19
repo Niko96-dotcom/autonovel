@@ -14,6 +14,8 @@ import sys
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
+import book_config
+
 BASE_DIR = Path(__file__).parent
 
 
@@ -55,31 +57,61 @@ def draw_text_with_shadow(draw, position, text, font, fill, shadow_color, shadow
     draw.text((x, y), text, font=font, fill=fill, anchor="mt")
 
 
+# Average luminance below this uses the dark (light-on-dark) palette.
+COVER_AUTO_DARK_BELOW = 140
+
+# dark art: light fill on a dark band. light art: dark fill on a light band.
+_DARK_COVER_PALETTE = (
+    (255, 250, 240, 255),
+    (0, 0, 0, 200),
+    (0, 0, 0, 140),
+)
+_LIGHT_COVER_PALETTE = (
+    (28, 22, 16, 255),
+    (255, 250, 240, 180),
+    (255, 250, 240, 150),
+)
+
+
+def cover_text_palette(preset, brightness=None):
+    """Return (text_color, shadow_color, band_color) for a cover preset.
+
+    ``auto`` maps average brightness (0–255) onto those two palettes:
+    values below COVER_AUTO_DARK_BELOW use dark (light-on-dark).
+    """
+    if preset == "auto":
+        preset = "dark" if brightness < COVER_AUTO_DARK_BELOW else "light"
+    if preset == "dark":
+        return _DARK_COVER_PALETTE
+    return _LIGHT_COVER_PALETTE
+
+
 def composite_cover(
     art_path,
-    title="The Second Son of the House of Bells",
-    author="Claude Hermes",
+    title=None,
+    author=None,
     subtitle="A Novel",
     preset="auto",
     output_path=None,
 ):
+    book = book_config.load_book()
+    if title is None:
+        title = str(book.get("title") or "Untitled Novel")
+    if author is None:
+        author = str(book.get("author") or "")
+
     img = Image.open(art_path).convert("RGBA")
     w, h = img.size
 
-    # Auto-detect light/dark
+    brightness = None
     if preset == "auto":
-        top_brightness = analyze_image_brightness(img, "top")
-        bottom_brightness = analyze_image_brightness(img, "bottom")
-        preset = "dark" if (top_brightness + bottom_brightness) / 2 < 140 else "light"
-
-    if preset == "dark":
-        text_color = (255, 250, 240, 255)  # bright warm white
-        shadow_color = (0, 0, 0, 200)
-        band_color = (0, 0, 0, 140)
-    else:
-        text_color = (255, 250, 240, 255)  # still light — use band for contrast
-        shadow_color = (0, 0, 0, 200)
-        band_color = (0, 0, 0, 140)
+        brightness = (
+            analyze_image_brightness(img, "top")
+            + analyze_image_brightness(img, "bottom")
+        ) / 2
+    text_color, shadow_color, band_color = cover_text_palette(preset, brightness)
+    if preset == "auto":
+        preset = "dark" if (text_color, shadow_color, band_color) == cover_text_palette("dark") else "light"
 
     # Font sizing — LARGE, airport-shelf readable
     title_size = max(int(w * 0.09), 36)
@@ -176,10 +208,11 @@ def composite_cover(
 
 
 def main():
+    book = book_config.load_book()
     parser = argparse.ArgumentParser(description="Composite text over cover art")
     parser.add_argument("art_path", help="Path to the cover art image")
-    parser.add_argument("--title", default="The Second Son of the House of Bells")
-    parser.add_argument("--author", default="Claude Hermes")
+    parser.add_argument("--title", default=str(book.get("title") or "Untitled Novel"))
+    parser.add_argument("--author", default=str(book.get("author") or ""))
     parser.add_argument("--subtitle", default="A Novel")
     parser.add_argument("--preset", choices=["auto", "dark", "light"], default="auto")
     parser.add_argument("--output", default=None)

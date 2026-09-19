@@ -10,43 +10,11 @@ import json
 import statistics
 from pathlib import Path
 from collections import Counter
+from book_config import chapter_numbers
+from voice_parse import load_vocabulary_wells
 
 BASE_DIR = Path(__file__).parent
 CHAPTERS_DIR = BASE_DIR / "chapters"
-
-# The three vocabulary wells from voice.md
-WELL_MUSICAL = {
-    "pitch", "tone", "interval", "chord", "note", "key", "octave", "fifth",
-    "third", "fourth", "second", "seventh", "flat", "sharp", "harmonic",
-    "resonance", "frequency", "vibration", "hum", "ring", "struck", "bell",
-    "bells", "clapper", "tuning", "tuned", "tune", "scale", "melody",
-    "rhythm", "beat", "measure", "rest", "composition", "composed", "sang",
-    "sung", "sing", "singing", "voice", "voices", "choir", "acoustic",
-    "acoustics", "sound", "sounds", "silence", "silent", "dissonance",
-    "consonance", "resolution", "resolve", "resolving", "progression",
-    "cadence", "tempo", "refrain", "notation", "codex", "fugue", "phrase",
-}
-
-WELL_TRADE = {
-    "bronze", "metal", "iron", "copper", "alloy", "forge", "lathe",
-    "clapper", "gauge", "caliper", "oil", "linseed", "flux", "casting",
-    "mold", "anvil", "hammer", "file", "workshop", "bench", "tools",
-    "tool", "craft", "frame", "frames", "wax", "polish", "grain",
-    "wood", "stone", "limestone", "coin", "coins", "contract", "contracts",
-    "clause", "binding", "ratification", "petition", "ledger", "registry",
-    "license", "licensed", "broker", "brokers", "merchant", "trade",
-}
-
-WELL_BODY = {
-    "eye", "eyes", "hand", "hands", "chest", "ribs", "jaw", "teeth",
-    "tongue", "mouth", "throat", "shoulder", "shoulders", "back", "spine",
-    "bone", "bones", "skin", "palm", "finger", "fingers", "thigh",
-    "knee", "feet", "foot", "breath", "breathing", "pulse", "heart",
-    "stomach", "gut", "temple", "temples", "skull", "wrist", "arm",
-    "neck", "needle", "pain", "ache", "pressure", "tremor", "shaking",
-    "shake", "shook", "steady", "still", "flinch", "tense", "tight",
-    "cold", "warm", "heat", "sweat",
-}
 
 # Abstract vs concrete noun indicators
 ABSTRACT_INDICATORS = {
@@ -57,11 +25,13 @@ ABSTRACT_INDICATORS = {
     "awareness", "consciousness", "realization", "understanding",
 }
 
-def analyze_chapter(path):
+def analyze_chapter(path, wells=None):
     text = path.read_text()
     words = text.split()
     word_count = len(words)
     lower_words = [w.lower().strip(".,;:!?\"'()—-–") for w in words]
+    if wells is None:
+        wells = load_vocabulary_wells(BASE_DIR / "voice.md")
     
     # Sentence analysis
     sentences = re.split(r'[.!?]+', text)
@@ -72,11 +42,12 @@ def analyze_chapter(path):
     paragraphs = [p.strip() for p in text.split('\n\n') if p.strip() and not p.strip().startswith('#') and p.strip() != '---']
     para_lengths = [len(p.split()) for p in paragraphs]
     
-    # Vocabulary well counts
-    musical_count = sum(1 for w in lower_words if w in WELL_MUSICAL)
-    trade_count = sum(1 for w in lower_words if w in WELL_TRADE)
-    body_count = sum(1 for w in lower_words if w in WELL_BODY)
-    total_well = musical_count + trade_count + body_count or 1
+    # Vocabulary well counts (word sets come from the current voice.md)
+    musical_count = sum(1 for w in lower_words if w in wells["musical"])
+    trade_count = sum(1 for w in lower_words if w in wells["trade"])
+    body_count = sum(1 for w in lower_words if w in wells["body"])
+    well_hits = musical_count + trade_count + body_count
+    total_well = well_hits or 1
     
     # Abstract noun density
     abstract_count = sum(1 for w in lower_words if w in ABSTRACT_INDICATORS)
@@ -130,7 +101,7 @@ def analyze_chapter(path):
         "well_musical_pct": round(musical_count / total_well * 100, 1),
         "well_trade_pct": round(trade_count / total_well * 100, 1),
         "well_body_pct": round(body_count / total_well * 100, 1),
-        "well_total_per_1k": round(total_well / word_count * 1000, 1) if word_count > 0 else 0,
+        "well_total_per_1k": round(well_hits / word_count * 1000, 1) if word_count > 0 else 0,
         "abstract_per_1k": round(abstract_count / word_count * 1000, 1) if word_count > 0 else 0,
         "dialogue_ratio": round(dialogue_ratio, 3),
         "em_dash_per_1k": round(em_per_1k, 1),
@@ -142,10 +113,11 @@ def analyze_chapter(path):
 
 def main():
     results = {}
-    for ch in range(1, 25):
+    wells = load_vocabulary_wells(BASE_DIR / "voice.md")
+    for ch in chapter_numbers():
         path = CHAPTERS_DIR / f"ch_{ch:02d}.md"
         if path.exists():
-            results[f"ch_{ch:02d}"] = analyze_chapter(path)
+            results[f"ch_{ch:02d}"] = analyze_chapter(path, wells=wells)
     
     # Compute novel-wide averages
     all_vals = list(results.values())
@@ -177,9 +149,10 @@ def main():
     print("VOICE FINGERPRINT")
     print("=" * 70)
     print(f"{'Ch':<8} {'Words':<7} {'AvgSnt':<7} {'CV':<6} {'Frag%':<7} {'Long%':<7} {'Dial%':<7} {'Mus%':<6} {'Trd%':<6} {'Bod%':<6} {'AbsPK':<6} {'HeStrt':<7}")
-    for ch in range(1, 25):
-        key = f"ch_{ch:02d}"
-        r = results[key]
+    for key, r in results.items():
+        if key == "novel_average":
+            continue
+        ch = int(key.split("_")[1])
         print(f"  {ch:<6} {r['word_count']:<7} {r['avg_sentence_length']:<7} {r['sentence_length_cv']:<6} {r['fragments_pct']:<7} {r['long_sentences_pct']:<7} {r['dialogue_ratio']:<7} {r['well_musical_pct']:<6} {r['well_trade_pct']:<6} {r['well_body_pct']:<6} {r['abstract_per_1k']:<6} {r['he_start_pct']:<7}")
     
     r = results["novel_average"]

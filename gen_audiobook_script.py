@@ -19,6 +19,7 @@ import re
 from pathlib import Path
 from dotenv import load_dotenv
 from llm_client import call_llm
+from book_config import chapter_numbers
 
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env", override=True)
@@ -29,22 +30,27 @@ CHAPTERS_DIR = BASE_DIR / "chapters"
 AUDIO_DIR = BASE_DIR / "audiobook"
 SCRIPTS_DIR = AUDIO_DIR / "scripts"
 
-# Characters from the novel
-CHARACTERS = {
-    "NARRATOR": "The narrative voice — warm, measured, precise. Reads prose with the rhythm of the novel's world.",
-    "CASS": "14-year-old boy. Dry, sharp, sometimes frustrated. His voice tightens when he lies or holds back.",
-    "EDDAN": "52, Cass's father. Deep, rough, terse. Sentences often trail off or restart. Workshop voice is steadier than kitchen voice.",
-    "PERIN": "26, Cass's brother. Dry, precise, carries something heavy. Letters-voice is more controlled than in-person voice.",
-    "LENNE": "14, female. Quick, confident, intellectually sharp. Composes while she talks — fingers moving, voice certain.",
-    "TORVALD": "63, retired dye merchant. Gravelly, warm, rambling. Outer-district speech — longer sentences, less careful, trade metaphors.",
-    "MARET": "60, female. Controlled, precise, still. No wasted words. When she finally shows emotion it's devastating.",
-    "DAV_SORN": "34, Court Singer. Formal, clipped, self-correcting. Starts sentences and abandons them. Qualifying everything.",
-    "PROCTOR_FEN": "Male, middle-aged, Academy teacher. Dry, archly amused, pedagogical.",
-    "FERREN": "40, acoustician. Clinical, measured, professional.",
-    "MIRA_FEN": "60s, female, Academy scholar. Quiet, precise, carrying thirty years of regret.",
-    "VELLA": "Lenne's mother, Court Singer. Measured, formal, the weight of knowing she's about to risk everything.",
-    "OSSIAN": "14, male student. Nervous, eager, tends to overstate.",
-}
+NARRATOR_DESCRIPTION = (
+    "The narrative voice — warm, measured, precise. "
+    "Reads prose with the rhythm of the novel's world."
+)
+
+
+def load_characters():
+    """Build a speaker roster from characters.md plus a generic NARRATOR."""
+    characters = {"NARRATOR": NARRATOR_DESCRIPTION}
+    path = BASE_DIR / "characters.md"
+    if not path.exists():
+        return characters
+
+    text = re.sub(r"<!--.*?-->", "", path.read_text(), flags=re.DOTALL)
+    for section in re.split(r"^## ", text, flags=re.MULTILINE)[1:]:
+        heading_line, _, body = section.partition("\n")
+        name = re.sub(r"\s*\([^)]*\)\s*$", "", heading_line.strip()).strip()
+        if not name:
+            continue
+        characters[name] = body.strip() or name
+    return characters
 
 AUDIO_TAG_GUIDE = """
 Available ElevenLabs v3 audio tags (use sparingly, only when the emotion is CLEAR):
@@ -84,11 +90,12 @@ def parse_chapter(ch_num):
     text = ch_path.read_text()
     title = text.split("\n")[0].lstrip("# ").strip()
     wc = len(text.split())
+    characters = load_characters()
 
     prompt = f"""You are parsing a novel chapter into an audiobook script. Your job is to break the text into segments, each attributed to a speaker, with optional audio delivery tags.
 
 CHARACTERS IN THIS NOVEL:
-{json.dumps(CHARACTERS, indent=2)}
+{json.dumps(characters, indent=2)}
 
 AUDIO TAG GUIDE:
 {AUDIO_TAG_GUIDE}
@@ -102,7 +109,7 @@ RULES:
 6. Scene breaks (---) become {{"speaker": "NARRATOR", "text": "[pause]"}}
 7. Chapter titles become the first segment: {{"speaker": "NARRATOR", "text": "[slowly] Chapter One: The Morning Pitch"}}
 8. Add audio tags based on emotional context. Be subtle — most lines need no tag.
-9. Internal thoughts in *italics* should be read by the CHARACTER (Cass usually), tagged [softly] or [whisper].
+9. Internal thoughts in *italics* should be read by the CHARACTER whose thought they are, tagged [softly] or [whisper].
 
 OUTPUT FORMAT: A JSON array of objects, each with:
   "speaker": character name (from the list above)
@@ -163,21 +170,19 @@ Output the JSON array only. No other text."""
 def main():
     SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Parse args for chapter range
-    chapters = sorted(CHAPTERS_DIR.glob("ch_*.md"))
-    total = len(chapters)
-
+    present = chapter_numbers()
     if len(sys.argv) == 2:
-        start = end = int(sys.argv[1])
+        chapters = [int(sys.argv[1])]
     elif len(sys.argv) == 3:
         start, end = int(sys.argv[1]), int(sys.argv[2])
+        chapters = [n for n in present if start <= n <= end]
     else:
-        start, end = 1, total
+        chapters = present
 
-    print(f"Parsing chapters {start}-{end} into audiobook scripts...")
+    print(f"Parsing chapters {', '.join(str(n) for n in chapters)} into audiobook scripts...")
 
     all_scripts = []
-    for ch_num in range(start, end + 1):
+    for ch_num in chapters:
         script = parse_chapter(ch_num)
         if script:
             # Save individual chapter script

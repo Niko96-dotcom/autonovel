@@ -19,7 +19,11 @@ def main() -> int:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
-    model = os.environ.get("AUTONOVEL_WRITER_MODEL", "")
+    model = os.environ.get("AUTONOVEL_WRITER_MODEL", "claude-sonnet-4-6").strip()
+    if not model:
+        print("ERROR: AUTONOVEL_WRITER_MODEL is empty", file=sys.stderr)
+        return 1
+
     print(f"Backend: {provider()} at {api_base_url()}")
     print(f"Model: {model}")
     reply = call_llm(

@@ -1,14 +1,12 @@
-![ ](epub_back_cover.png)
-
 \
 
 \
 
-**NOVEL TITLE**
+**The Second Son of the House of Bells**
 
 \
 
-*Author Name*
+*Claude Hermes*
 
 \
 
@@ -16,4 +14,4 @@
 
 \
 
-*https://example.com*
+*https://nousresearch.com/bells*
