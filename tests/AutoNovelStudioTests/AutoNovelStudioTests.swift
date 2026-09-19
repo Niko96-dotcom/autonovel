@@ -321,6 +321,9 @@ final class AutoNovelStudioTests: XCTestCase {
         XCTAssertTrue(forced.isForced)
         XCTAssertNotEqual(forced.resultSymbol, "checkmark.circle")
         XCTAssertEqual(forced.resultSymbol, "exclamationmark.triangle.fill")
+        XCTAssertFalse(forced.isSuccessAppearance)
+        XCTAssertFalse(discarded.isSuccessAppearance)
+        XCTAssertFalse(failed.isSuccessAppearance)
     }
 
     func testForcedEvaluationHistoryIsNotShownAsSuccess() {
@@ -328,12 +331,18 @@ final class AutoNovelStudioTests: XCTestCase {
             index: 0,
             columns: ["deadbeef", "ch03", "?", "1840", "forced", "Chapter 3: kept after max attempts"]
         )
+        let kept = ActivityRecord(
+            index: 1,
+            columns: ["abc123", "ch01", "8.0", "1200", "keep", "Chapter 1 kept"]
+        )
 
         XCTAssertTrue(forced.isForced)
         XCTAssertFalse(forced.isFailure)
         XCTAssertFalse(forced.isDiscarded)
         XCTAssertNotEqual(forced.resultSymbol, "checkmark.circle")
         XCTAssertEqual(forced.resultSymbol, "exclamationmark.triangle.fill")
+        XCTAssertFalse(forced.isSuccessAppearance)
+        XCTAssertTrue(kept.isSuccessAppearance)
     }
 
     func testChapterWithoutHeadingUsesStableNumberInsteadOfProseAsTitle() {

@@ -8,4 +8,4 @@ title: ""
 
 \
 
-*https://nousresearch.com/bells*
+*https://example.com*

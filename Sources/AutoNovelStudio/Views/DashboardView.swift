@@ -347,7 +347,13 @@ struct DashboardView: View {
                 ForEach(store.activity.prefix(4)) { record in
                     HStack(spacing: 12) {
                         Image(systemName: record.resultSymbol)
-                            .foregroundStyle(record.isFailure ? .red : (record.isDiscarded ? .orange : StudioTheme.success))
+                            .foregroundStyle(
+                                record.isFailure
+                                    ? .red
+                                    : (record.isDiscarded || record.isForced
+                                        ? .orange
+                                        : StudioTheme.success)
+                            )
                             .frame(width: 18)
                         Text(record.title)
                             .font(.subheadline.weight(.medium))

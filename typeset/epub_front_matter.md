@@ -2,11 +2,11 @@
 
 \
 
-**The Second Son of the House of Bells**
+**NOVEL TITLE**
 
 \
 
-*Claude Hermes*
+*Author Name*
 
 \
 
@@ -14,4 +14,4 @@
 
 \
 
-*https://nousresearch.com/bells*
+*https://example.com*

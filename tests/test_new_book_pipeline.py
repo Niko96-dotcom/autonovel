@@ -470,7 +470,7 @@ class NewBookPipelineTests(unittest.TestCase):
         self.assertFalse(any("git reset --hard" in cmd for cmd in tool_cmds))
         self.assertFalse(any("git add -A" in cmd for cmd in tool_cmds))
 
-    def test_foundation_eval_timeout_does_not_checkout_planning_docs(self):
+    def test_foundation_eval_timeout_restores_planning_docs(self):
         tool_cmds = []
         planning = (
             "voice.md",
@@ -495,6 +495,7 @@ class NewBookPipelineTests(unittest.TestCase):
             for name in planning:
                 (tmp_path / name).write_text("new planning")
             state = run_pipeline.default_state()
+            # Prior keep must not validate an unevaluated overwrite as PASSED.
             state["foundation_score"] = 8.0
             with patch.object(run_pipeline, "run_generation"), patch.object(
                 run_pipeline, "uv_run", side_effect=fake_uv_run
@@ -502,13 +503,19 @@ class NewBookPipelineTests(unittest.TestCase):
                 run_pipeline, "BASE_DIR", tmp_path
             ), patch.object(run_pipeline, "save_state"), patch.object(
                 run_pipeline, "log_result"
-            ):
+            ), patch.object(run_pipeline, "MAX_FOUNDATION_ITERS", 1):
                 run_pipeline.run_foundation(state)
 
-        self.assertFalse(any("git checkout --" in cmd for cmd in tool_cmds))
+        self.assertTrue(
+            any(
+                "git checkout -- voice.md world.md characters.md" in cmd
+                for cmd in tool_cmds
+            )
+        )
         self.assertEqual(state["foundation_score"], 8.0)
+        self.assertEqual(state["phase"], "drafting")
 
-    def test_revision_post_eval_timeout_does_not_checkout_chapter(self):
+    def test_revision_post_eval_timeout_restores_chapter(self):
         tool_cmds = []
 
         def fake_generation(script, timeout):
@@ -524,9 +531,21 @@ class NewBookPipelineTests(unittest.TestCase):
                 }))
 
         def fake_uv_run(script, timeout=600):
-            if "evaluate.py" in script:
+            if "evaluate.py --chapter=" in script:
+                # Pre-eval succeeds so revision runs; post-eval times out.
+                if not hasattr(fake_uv_run, "chapter_evals"):
+                    fake_uv_run.chapter_evals = 0
+                fake_uv_run.chapter_evals += 1
+                if fake_uv_run.chapter_evals == 1:
+                    return subprocess.CompletedProcess(
+                        script, 0, stdout="overall_score: 7.0\n", stderr=""
+                    )
                 return subprocess.CompletedProcess(
                     script, -1, stdout="", stderr="TIMEOUT"
+                )
+            if "evaluate.py" in script:
+                return subprocess.CompletedProcess(
+                    script, 0, stdout="novel_score: 8.0\noverall_score: 8.0\n", stderr=""
                 )
             return subprocess.CompletedProcess(
                 script, 0, stdout="novel_score: 8.0\noverall_score: 8.0\n", stderr=""
@@ -556,10 +575,11 @@ class NewBookPipelineTests(unittest.TestCase):
             ):
                 run_pipeline.run_revision(state, max_cycles=1)
 
-        self.assertFalse(any("git checkout -- chapters/ch_02.md" in cmd for cmd in tool_cmds))
-        self.assertEqual(state["novel_score"], 7.5)
+        self.assertTrue(any("git checkout -- chapters/ch_02.md" in cmd for cmd in tool_cmds))
+        # Full-novel eval may still update novel_score; chapter must be restored.
+        self.assertIn(state["novel_score"], (7.5, 8.0))
 
-    def test_revision_empty_eval_stdout_does_not_checkout_chapter(self):
+    def test_revision_empty_eval_stdout_restores_chapter(self):
         tool_cmds = []
 
         def fake_generation(script, timeout):
@@ -575,8 +595,19 @@ class NewBookPipelineTests(unittest.TestCase):
                 }))
 
         def fake_uv_run(script, timeout=600):
-            if "evaluate.py" in script:
+            if "evaluate.py --chapter=" in script:
+                if not hasattr(fake_uv_run, "chapter_evals"):
+                    fake_uv_run.chapter_evals = 0
+                fake_uv_run.chapter_evals += 1
+                if fake_uv_run.chapter_evals == 1:
+                    return subprocess.CompletedProcess(
+                        script, 0, stdout="overall_score: 6.5\n", stderr=""
+                    )
                 return subprocess.CompletedProcess(script, 0, stdout="", stderr="")
+            if "evaluate.py" in script:
+                return subprocess.CompletedProcess(
+                    script, 0, stdout="novel_score: 8.0\noverall_score: 8.0\n", stderr=""
+                )
             return subprocess.CompletedProcess(
                 script, 0, stdout="novel_score: 8.0\noverall_score: 8.0\n", stderr=""
             )
@@ -605,8 +636,8 @@ class NewBookPipelineTests(unittest.TestCase):
             ):
                 run_pipeline.run_revision(state, max_cycles=1)
 
-        self.assertFalse(any("git checkout -- chapters/ch_03.md" in cmd for cmd in tool_cmds))
-        self.assertEqual(state["novel_score"], 7.5)
+        self.assertTrue(any("git checkout -- chapters/ch_03.md" in cmd for cmd in tool_cmds))
+        self.assertIn(state["novel_score"], (7.5, 8.0))
         self.assertNotEqual(state["novel_score"], -1.0)
 
     def test_failed_drafts_keep_last_attempt_not_head_chapter(self):
@@ -1517,7 +1548,7 @@ class NewBookPipelineTests(unittest.TestCase):
         self.assertIn("uv run python apply_cuts.py all", pipeline_src)
         self.assertIn("--types OVER-EXPLAIN REDUNDANT", pipeline_src)
 
-    def test_build_tex_updates_chapters_without_clobbering_novel_wrapper(self):
+    def test_build_tex_writes_book_specific_novel_and_chapters(self):
         import importlib.util
 
         spec = importlib.util.spec_from_file_location(
@@ -1533,11 +1564,9 @@ class NewBookPipelineTests(unittest.TestCase):
             typeset_dir = tmp_path / "typeset"
             chapters.mkdir()
             typeset_dir.mkdir()
-            novel_tex = typeset_dir / "novel.tex"
-            novel_tex.write_text(
-                "\\makenoveltitle\n\\input{chapters_content.tex}\n"
+            (tmp_path / "book.json").write_text(
+                json.dumps({"title": "River Glass", "author": "Ada Vale"})
             )
-            original = novel_tex.read_bytes()
             (chapters / "ch_01.md").write_text(
                 "# Chapter 1: The Opening\n\nFirst scene.\n---\nSecond scene.\n"
             )
@@ -1546,12 +1575,17 @@ class NewBookPipelineTests(unittest.TestCase):
             ), patch.object(build_tex, "OUT_DIR", typeset_dir):
                 build_tex.main()
 
-            self.assertEqual(novel_tex.read_bytes(), original)
-            self.assertIn("\\makenoveltitle", novel_tex.read_text())
-            self.assertIn("\\input{chapters_content.tex}", novel_tex.read_text())
+            novel_tex = (typeset_dir / "novel.tex").read_text()
+            self.assertIn("pdftitle={River Glass}", novel_tex)
+            self.assertIn("pdfauthor={Ada Vale}", novel_tex)
+            self.assertIn("\\input{typeset/chapters_content.tex}", novel_tex)
+            self.assertNotIn("House of Bells", novel_tex)
             content = (typeset_dir / "chapters_content.tex").read_text()
             self.assertIn("\\chapter{", content)
             self.assertIn("\\scenebreak", content)
+            meta = (typeset_dir / "epub_metadata.yaml").read_text()
+            self.assertIn("title: River Glass", meta)
+            self.assertIn("author: Ada Vale", meta)
 
 
 if __name__ == "__main__":

@@ -247,6 +247,14 @@ class ParseJSONResponseTests(unittest.TestCase):
             [{"quote": "cut this sentence now", "type": "FAT"}],
         )
 
+    def test_prefatory_brackets_prefer_object(self):
+        raw = 'Thoughts [ok] then {"a": 1}'
+        self.assertEqual(llm_client.parse_json_response(raw), {"a": 1})
+
+    def test_object_preferred_when_both_present(self):
+        raw = 'Note [draft] {"score": 9}\n[{"ignored": true}]'
+        self.assertEqual(llm_client.parse_json_response(raw), {"score": 9})
+
 
 if __name__ == "__main__":
     unittest.main()

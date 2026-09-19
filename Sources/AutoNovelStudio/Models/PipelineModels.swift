@@ -127,6 +127,10 @@ struct ActivityRecord: Identifiable, Hashable {
     var isForced: Bool {
         resultStatus == "forced" || (columns.indices.contains(2) && score == nil)
     }
+    /// Forced keeps are not successes — Dashboard must not paint them moss green.
+    var isSuccessAppearance: Bool {
+        !isFailure && !isDiscarded && !isForced
+    }
     var resultSymbol: String {
         if isFailure { return "exclamationmark.triangle.fill" }
         if isDiscarded { return "arrow.counterclockwise.circle" }

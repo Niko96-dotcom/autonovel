@@ -423,10 +423,34 @@ def run_foundation(state: dict) -> dict:
 
         step(f"Foundation score: {score}  (lore: {lore}, prev best: {best_score})")
 
-        # 3. Keep or discard. Missing/failed eval is not a low literary score.
+        # 3. Keep or discard. Failed/unparseable eval must not keep an
+        # unevaluated overwrite, and must not PASS via a prior best_score.
+        planning_checkout = (
+            "git checkout -- voice.md world.md characters.md "
+            "outline.md canon.md MYSTERY.md 2>/dev/null || true"
+        )
         if score is None:
-            step("Foundation eval failed or unparseable — keeping generated docs")
-        elif score > best_score:
+            step(
+                "Foundation eval failed or unparseable — restoring planning docs"
+            )
+            run_tool(planning_checkout)
+            log_result(
+                "restored",
+                "foundation",
+                best_score,
+                0,
+                "discard",
+                f"Iteration {i}: eval failed; restored planning docs from HEAD",
+            )
+            # Prior best_score validates HEAD (now restored), not the overwrite.
+            if best_score >= FOUNDATION_THRESHOLD:
+                step(
+                    f"Foundation score {best_score} >= {FOUNDATION_THRESHOLD} "
+                    "— PASSED (restored prior keep)"
+                )
+                break
+            continue
+        if score > best_score:
             commit_hash = git_add_commit(
                 f"foundation iter {i}: score {score} (lore {lore})")
             log_result(commit_hash, "foundation", score, 0, "keep",
@@ -437,14 +461,11 @@ def run_foundation(state: dict) -> dict:
             save_state(state)
         else:
             step(f"Score did not improve ({score} <= {best_score}), discarding")
-            run_tool(
-                "git checkout -- voice.md world.md characters.md "
-                "outline.md canon.md MYSTERY.md 2>/dev/null || true"
-            )
+            run_tool(planning_checkout)
             log_result("discarded", "foundation", score, 0, "discard",
                        f"Iteration {i}: no improvement ({score} <= {best_score})")
 
-        # 4. Check exit condition
+        # 4. Check exit condition (only after a successful parseable eval)
         if best_score >= FOUNDATION_THRESHOLD:
             step(f"Foundation score {best_score} >= {FOUNDATION_THRESHOLD} — PASSED")
             break
@@ -695,7 +716,13 @@ def run_revision(state: dict, max_cycles: int = MAX_REVISION_CYCLES) -> dict:
 
             # Snapshot the current chapter score for comparison
             pre_eval = uv_run(f"evaluate.py --chapter={ch_num}", timeout=MODEL_TOOL_TIMEOUT)
-            pre_score = parse_score(pre_eval.stdout, "overall_score")
+            pre_score = usable_score(pre_eval, "overall_score")
+            if pre_score is None:
+                step(
+                    f"Ch {ch_num} pre-eval failed or unparseable — "
+                    "skipping revision until a usable baseline exists"
+                )
+                continue
 
             # Generate revision brief
             brief_file = BRIEFS_DIR / f"ch{ch_num:02d}_cycle{cycle}_{question}.md"
@@ -738,8 +765,23 @@ def run_revision(state: dict, max_cycles: int = MAX_REVISION_CYCLES) -> dict:
 
             step(f"Ch {ch_num}: {pre_score} -> {post_score}")
 
+            chapter_checkout = (
+                f"git checkout -- chapters/ch_{ch_num:02d}.md 2>/dev/null || true"
+            )
             if post_score is None:
-                step(f"Ch {ch_num} post-eval failed or unparseable — keeping revision")
+                step(
+                    f"Ch {ch_num} post-eval failed or unparseable — "
+                    "restoring chapter"
+                )
+                run_tool(chapter_checkout)
+                log_result(
+                    "restored",
+                    f"rev-ch{ch_num:02d}",
+                    pre_score,
+                    word_count,
+                    "discard",
+                    f"Cycle {cycle}: {question} post-eval failed; restored chapter",
+                )
             elif post_score >= pre_score:
                 commit_hash = git_add_commit(
                     f"revision cycle {cycle}: ch{ch_num:02d} "
@@ -749,7 +791,7 @@ def run_revision(state: dict, max_cycles: int = MAX_REVISION_CYCLES) -> dict:
                            f"Cycle {cycle}: {question} improved {pre_score}->{post_score}")
             else:
                 step(f"Revision made it worse ({post_score} < {pre_score}), reverting")
-                run_tool(f"git checkout -- chapters/ch_{ch_num:02d}.md 2>/dev/null || true")
+                run_tool(chapter_checkout)
                 log_result("reverted", f"rev-ch{ch_num:02d}", post_score,
                            word_count, "discard",
                            f"Cycle {cycle}: {question} regressed {pre_score}->{post_score}")

@@ -126,18 +126,8 @@ def prompt_fits_context(prompt: str, *, system: str = "", max_tokens: int = 0) -
     return used <= context_window()
 
 
-def parse_json_response(text: str):
-    """Extract JSON from a response that might have markdown fences or trailing text."""
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r'^```\w*\n?', '', text)
-        text = re.sub(r'\n?```$', '', text)
-    obj_start = text.find('{')
-    arr_start = text.find('[')
-    candidates = [index for index in (obj_start, arr_start) if index != -1]
-    if not candidates:
-        raise ValueError("No JSON object found in response")
-    start = min(candidates)
+def _extract_json_value(text: str, start: int):
+    """Parse one JSON object/array starting at ``start``, or raise ValueError."""
     depth = 0
     in_string = False
     escape = False
@@ -161,12 +151,40 @@ def parse_json_response(text: str):
         elif c == close_char:
             depth -= 1
             if depth == 0:
-                return json.loads(text[start:i+1], strict=False)
+                return json.loads(text[start:i + 1], strict=False)
+    raise ValueError("Unbalanced JSON bracket in response")
+
+
+def parse_json_response(text: str):
+    """Extract JSON from a response that might have markdown fences or trailing text."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r'^```\w*\n?', '', text)
+        text = re.sub(r'\n?```$', '', text)
+    obj_start = text.find('{')
+    arr_start = text.find('[')
+    # Try each bracket start by position. Prefatory prose like "Thoughts [ok]"
+    # fails first, then a later object succeeds; real array payloads still win
+    # when '[' is the outermost value.
+    attempts = sorted({index for index in (obj_start, arr_start) if index != -1})
+    if not attempts:
+        raise ValueError("No JSON object found in response")
+    errors: list[Exception] = []
+    for start in attempts:
+        try:
+            return _extract_json_value(text, start)
+        except (json.JSONDecodeError, ValueError) as exc:
+            errors.append(exc)
     try:
         return json.loads(text, strict=False)
     except json.JSONDecodeError:
         fixed = re.sub(r'(?<!\\)\n', '\\n', text)
-        return json.loads(fixed, strict=False)
+        try:
+            return json.loads(fixed, strict=False)
+        except json.JSONDecodeError as exc:
+            if errors:
+                raise errors[0] from exc
+            raise
 
 
 def _endpoint(path: str) -> str:
