@@ -591,6 +591,61 @@ final class AutoNovelStudioTests: XCTestCase {
         XCTAssertEqual(values["AUTONOVEL_API_KEY_FILE"], KeychainSecretStore.sentinel)
     }
 
+    @MainActor
+    func testFullPipelineResumesWhenCompleteUnverified() throws {
+        let draftingRoot = try makeReadyCompleteProject(
+            consecutiveChapters: 0,
+            chaptersTotal: 5,
+            novelScore: 11
+        )
+        defer { try? FileManager.default.removeItem(at: draftingRoot) }
+        let draftingStore = StudioStore(projectURL: draftingRoot)
+        XCTAssertTrue(draftingStore.seedIsReady)
+        XCTAssertEqual(draftingStore.loadBookBrief().requiredCompleted, 5)
+        XCTAssertFalse(draftingStore.completionIsVerified)
+        XCTAssertEqual(draftingStore.currentPhase, .drafting)
+        XCTAssertEqual(try draftingStore.prepareFullPipelineArguments(), ["run_pipeline.py"])
+        XCTAssertFalse(draftingStore.runner.isRunning)
+        XCTAssertEqual(draftingStore.state.phase, "drafting")
+        XCTAssertEqual(try pipelinePhase(in: draftingRoot), "drafting")
+        let draftingJSON = try stateJSON(in: draftingRoot)
+        XCTAssertTrue(draftingJSON.contains("\"chapters_total\""))
+        XCTAssertFalse(draftingJSON.contains("\"chaptersTotal\""))
+        XCTAssertTrue(draftingJSON.contains("\"novel_score\""))
+        XCTAssertFalse(draftingJSON.contains("\"novelScore\""))
+
+        let revisionRoot = try makeReadyCompleteProject(
+            consecutiveChapters: 5,
+            chaptersTotal: 5,
+            novelScore: 11
+        )
+        defer { try? FileManager.default.removeItem(at: revisionRoot) }
+        let revisionStore = StudioStore(projectURL: revisionRoot)
+        XCTAssertTrue(revisionStore.seedIsReady)
+        XCTAssertFalse(revisionStore.completionIsVerified)
+        XCTAssertEqual(revisionStore.actualDraftedChapters, 5)
+        XCTAssertEqual(revisionStore.currentPhase, .revision)
+        XCTAssertEqual(try revisionStore.prepareFullPipelineArguments(), ["run_pipeline.py"])
+        XCTAssertFalse(revisionStore.runner.isRunning)
+        XCTAssertEqual(revisionStore.state.phase, "revision")
+        XCTAssertEqual(try pipelinePhase(in: revisionRoot), "revision")
+
+        let verifiedRoot = try makeReadyCompleteProject(
+            consecutiveChapters: 5,
+            chaptersTotal: 5,
+            novelScore: 8
+        )
+        defer { try? FileManager.default.removeItem(at: verifiedRoot) }
+        let verifiedStore = StudioStore(projectURL: verifiedRoot)
+        XCTAssertTrue(verifiedStore.seedIsReady)
+        XCTAssertTrue(verifiedStore.completionIsVerified)
+        XCTAssertEqual(verifiedStore.currentPhase, .complete)
+        XCTAssertEqual(try verifiedStore.prepareFullPipelineArguments(), ["run_pipeline.py"])
+        XCTAssertFalse(verifiedStore.runner.isRunning)
+        XCTAssertEqual(verifiedStore.state.phase, "complete")
+        XCTAssertEqual(try pipelinePhase(in: verifiedRoot), "complete")
+    }
+
     func testKeychainRoundTripWhenAvailable() throws {
         let store = KeychainSecretStore(
             service: "org.nousresearch.autonovelstudio.tests",
@@ -603,5 +658,60 @@ final class AutoNovelStudioTests: XCTestCase {
         }
         defer { try? store.delete() }
         XCTAssertEqual(try store.read(), "round-trip-secret")
+    }
+
+    private func makeReadyCompleteProject(
+        consecutiveChapters: Int,
+        chaptersTotal: Int,
+        novelScore: Double
+    ) throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autonovel-full-run-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        var brief = BookBrief()
+        brief.title = "The Glass Cartographer"
+        brief.premise = "A mapmaker discovers that erased roads still remember their travelers."
+        brief.protagonist = "Mara, an exacting apprentice who cannot get lost."
+        brief.centralConflict = "The royal surveyor is deleting rebellious towns from reality."
+        brief.worldHook = "Maps determine which places can physically exist."
+        XCTAssertEqual(brief.requiredCompleted, 5)
+        try JSONEncoder().encode(brief).write(to: root.appendingPathComponent("book.json"))
+        try (brief.seedText + "\n").write(
+            to: root.appendingPathComponent("seed.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let stateJSON = """
+        {"phase":"complete","status":"complete","chapters_total":\(chaptersTotal),"novel_score":\(novelScore)}
+        """
+        try Data(stateJSON.utf8).write(to: root.appendingPathComponent("state.json"))
+
+        if consecutiveChapters > 0 {
+            let chapters = root.appendingPathComponent("chapters", isDirectory: true)
+            try FileManager.default.createDirectory(at: chapters, withIntermediateDirectories: true)
+            for number in 1...consecutiveChapters {
+                let name = String(format: "ch_%02d.md", number)
+                try "Chapter \(number) has enough words to count.\n".write(
+                    to: chapters.appendingPathComponent(name),
+                    atomically: true,
+                    encoding: .utf8
+                )
+            }
+        }
+        return root
+    }
+
+    private func stateJSON(in root: URL) throws -> String {
+        try String(contentsOf: root.appendingPathComponent("state.json"), encoding: .utf8)
+    }
+
+    private func pipelinePhase(in root: URL) throws -> String {
+        let state = try JSONDecoder().decode(
+            PipelineState.self,
+            from: Data(contentsOf: root.appendingPathComponent("state.json"))
+        )
+        return state.phase
     }
 }

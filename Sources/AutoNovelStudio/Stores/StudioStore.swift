@@ -204,11 +204,28 @@ final class StudioStore {
     }
 
     func runFullPipeline() {
+        let pythonArguments = (try? prepareFullPipelineArguments()) ?? ["run_pipeline.py"]
         runner.run(
             label: actualDraftedChapters > 0 ? "Resuming at chapter \(actualDraftedChapters + 1)" : "Writing the novel",
-            pythonArguments: ["run_pipeline.py"],
+            pythonArguments: pythonArguments,
             extraEnvironment: pipelineEnvironment()
         )
+    }
+
+    func prepareFullPipelineArguments() throws -> [String] {
+        if state.phase.lowercased() == "complete", !completionIsVerified {
+            var next = state
+            next.phase = currentPhase.rawValue
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+            let data = try encoder.encode(next)
+            try data.write(
+                to: projectURL.appendingPathComponent("state.json"),
+                options: .atomic
+            )
+            refresh()
+        }
+        return ["run_pipeline.py"]
     }
 
     private func pipelineEnvironment() -> [String: String] {
