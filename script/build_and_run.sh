@@ -1,61 +1,72 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Single kill + build + run entrypoint for AutoNovel Studio (SwiftPM GUI).
+# Canonical contract: build-run-debug references/run-button-bootstrap.md
 
 set -euo pipefail
 
-MODE="${1:---run}"
+MODE="${1:-run}"
 APP_NAME="AutoNovelStudio"
 BUNDLE_ID="org.nousresearch.autonovelstudio"
-MIN_OS="14.0"
+MIN_SYSTEM_VERSION="14.0"
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
-CONTENTS_DIR="$APP_BUNDLE/Contents"
-MACOS_DIR="$CONTENTS_DIR/MacOS"
+APP_CONTENTS="$APP_BUNDLE/Contents"
+APP_MACOS="$APP_CONTENTS/MacOS"
+APP_RESOURCES="$APP_CONTENTS/Resources"
+APP_BINARY="$APP_MACOS/$APP_NAME"
+INFO_PLIST="$APP_CONTENTS/Info.plist"
 
-show_logs() {
-  /usr/bin/log show --last 8m --style compact \
-    --predicate "process == '$APP_NAME' OR eventMessage CONTAINS[c] '$APP_NAME'" || true
+usage() {
+  echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--build-only]" >&2
 }
 
-show_telemetry() {
-  /usr/bin/log stream --style compact \
-    --predicate "process == '$APP_NAME' OR eventMessage CONTAINS[c] '$APP_NAME'"
-}
+case "$MODE" in
+  run|--run|"")
+    MODE="run"
+    ;;
+  --debug|debug)
+    MODE="debug"
+    ;;
+  --logs|logs)
+    MODE="logs"
+    ;;
+  --telemetry|telemetry)
+    MODE="telemetry"
+    ;;
+  --verify|verify)
+    MODE="verify"
+    ;;
+  --build-only|build-only)
+    MODE="build-only"
+    ;;
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
 
-if [[ "$MODE" == "--logs" ]]; then
-  show_logs
-  exit 0
-fi
-
-if [[ "$MODE" == "--telemetry" ]]; then
-  show_telemetry
-  exit 0
-fi
+pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
 cd "$ROOT_DIR"
 swift build
+BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
 
-if [[ "$MODE" == "--verify" ]]; then
-  swift test
-fi
-
-if [[ "$MODE" == "--debug" ]]; then
-  lldb "$ROOT_DIR/.build/debug/$APP_NAME"
-  exit 0
-fi
-
-/usr/bin/pkill -x "$APP_NAME" 2>/dev/null || true
-/bin/rm -rf "$APP_BUNDLE"
-RESOURCES_DIR="$CONTENTS_DIR/Resources"
-/bin/mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
-/bin/cp "$ROOT_DIR/.build/debug/$APP_NAME" "$MACOS_DIR/$APP_NAME"
+rm -rf "$APP_BUNDLE"
+mkdir -p "$APP_MACOS" "$APP_RESOURCES"
+cp "$BUILD_BINARY" "$APP_BINARY"
+chmod +x "$APP_BINARY"
 
 ICON_MASTER="$DIST_DIR/AppIcon-1024.png"
 ICONSET="$DIST_DIR/AppIcon.iconset"
 /usr/bin/python3 "$ROOT_DIR/script/render_app_icon.py" "$ICON_MASTER"
-/bin/rm -rf "$ICONSET"
-/bin/mkdir -p "$ICONSET"
+rm -rf "$ICONSET"
+mkdir -p "$ICONSET"
 /usr/bin/sips -z 16 16 "$ICON_MASTER" --out "$ICONSET/icon_16x16.png" >/dev/null
 /usr/bin/sips -z 32 32 "$ICON_MASTER" --out "$ICONSET/icon_16x16@2x.png" >/dev/null
 /usr/bin/sips -z 32 32 "$ICON_MASTER" --out "$ICONSET/icon_32x32.png" >/dev/null
@@ -66,11 +77,12 @@ ICONSET="$DIST_DIR/AppIcon.iconset"
 /usr/bin/sips -z 512 512 "$ICON_MASTER" --out "$ICONSET/icon_256x256@2x.png" >/dev/null
 /usr/bin/sips -z 512 512 "$ICON_MASTER" --out "$ICONSET/icon_512x512.png" >/dev/null
 /usr/bin/sips -z 1024 1024 "$ICON_MASTER" --out "$ICONSET/icon_512x512@2x.png" >/dev/null
-/usr/bin/iconutil -c icns -o "$RESOURCES_DIR/AppIcon.icns" "$ICONSET"
-/bin/rm -rf "$RESOURCES_DIR/AutoNovelStudio.help"
-/bin/cp -R "$ROOT_DIR/Sources/AutoNovelStudio/Resources/AutoNovelStudio.help" "$RESOURCES_DIR/AutoNovelStudio.help"
+/usr/bin/iconutil -c icns -o "$APP_RESOURCES/AppIcon.icns" "$ICONSET"
+rm -rf "$APP_RESOURCES/AutoNovelStudio.help"
+cp -R "$ROOT_DIR/Sources/AutoNovelStudio/Resources/AutoNovelStudio.help" \
+  "$APP_RESOURCES/AutoNovelStudio.help"
 
-/bin/cat > "$CONTENTS_DIR/Info.plist" <<PLIST
+cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -100,7 +112,7 @@ ICONSET="$DIST_DIR/AppIcon.iconset"
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>
-  <string>$MIN_OS</string>
+  <string>$MIN_SYSTEM_VERSION</string>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSPrincipalClass</key>
@@ -116,17 +128,39 @@ PLIST
 
 /usr/bin/codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
 
-if [[ "$MODE" == "--build-only" ]]; then
-  echo "Built $APP_BUNDLE"
-  exit 0
-fi
+open_app() {
+  export AUTONOVEL_PROJECT_DIR="$ROOT_DIR"
+  /usr/bin/open -n "$APP_BUNDLE"
+}
 
-export AUTONOVEL_PROJECT_DIR="$ROOT_DIR"
-/usr/bin/open -n "$APP_BUNDLE"
-if [[ "$MODE" == "--verify" ]]; then
-  /bin/sleep 2
-  /usr/bin/pgrep -x "$APP_NAME" >/dev/null
-  echo "Verified $APP_NAME is running from $APP_BUNDLE"
-else
-  echo "Launched $APP_BUNDLE"
-fi
+case "$MODE" in
+  run)
+    open_app
+    echo "Launched $APP_BUNDLE"
+    ;;
+  debug)
+    export AUTONOVEL_PROJECT_DIR="$ROOT_DIR"
+    lldb -- "$APP_BINARY"
+    ;;
+  logs)
+    open_app
+    /usr/bin/log stream --info --style compact --predicate "process == \"$APP_NAME\""
+    ;;
+  telemetry)
+    open_app
+    /usr/bin/log stream --info --style compact --predicate "subsystem == \"$BUNDLE_ID\""
+    ;;
+  verify)
+    open_app
+    sleep 2
+    pgrep -x "$APP_NAME" >/dev/null
+    echo "Verified $APP_NAME is running from $APP_BUNDLE"
+    ;;
+  build-only)
+    echo "Built $APP_BUNDLE"
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
