@@ -34,7 +34,7 @@ struct AutoNovelStudioApp: App {
     @State private var store = StudioStore()
 
     var body: some Scene {
-        WindowGroup("AutoNovel Studio") {
+        WindowGroup("AutoNovel Studio", id: "studio-main") {
             ContentView(store: store)
                 .frame(minWidth: 900, minHeight: 640)
                 .task { store.startMonitoring() }
@@ -47,11 +47,13 @@ struct AutoNovelStudioApp: App {
             StudioCommands(store: store)
         }
 
+        #if os(macOS)
         Settings {
             ProviderSettingsView(store: store)
         }
         .defaultSize(width: 640, height: 720)
         .windowResizability(.contentMinSize)
+        #endif
     }
 }
 
