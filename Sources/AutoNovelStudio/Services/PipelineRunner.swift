@@ -30,6 +30,7 @@ final class PipelineRunner {
     private var stderrPipe: Pipe?
     private var stdoutDecoder = UTF8StreamDecoder()
     private var stderrDecoder = UTF8StreamDecoder()
+    private var userStopped = false
 
     init(projectURL: URL) {
         self.projectURL = projectURL
@@ -63,6 +64,20 @@ final class PipelineRunner {
         return environment
     }
 
+    nonisolated static func finishState(
+        terminationStatus: Int32,
+        userStopped: Bool,
+        pythonArguments: [String]
+    ) -> (label: String, errorMessage: String?, recordSuccessfulCheck: Bool) {
+        if userStopped {
+            return ("Stopped", nil, false)
+        }
+        if terminationStatus == 0 {
+            return ("Finished", nil, pythonArguments == ["check_llm.py"])
+        }
+        return ("Failed", "The command exited with code \(terminationStatus).", false)
+    }
+
     func run(label: String, pythonArguments: [String], extraEnvironment: [String: String] = [:]) {
         guard !isRunning else { return }
         guard let uv = resolveUV() else {
@@ -88,6 +103,7 @@ final class PipelineRunner {
         self.label = label
         exitCode = nil
         errorMessage = nil
+        userStopped = false
         startedAt = Date()
         isRunning = true
         self.process = process
@@ -111,14 +127,16 @@ final class PipelineRunner {
                 self.append(stderrDecoder.consume(extraStderr, flush: true))
                 self.isRunning = false
                 self.exitCode = finished.terminationStatus
-                if finished.terminationStatus == 0 {
-                    self.label = "Finished"
-                    if pythonArguments == ["check_llm.py"] {
-                        self.lastSuccessfulCheck = Date()
-                    }
-                } else {
-                    self.label = "Failed"
-                    self.errorMessage = "The command exited with code \(finished.terminationStatus)."
+                let state = Self.finishState(
+                    terminationStatus: finished.terminationStatus,
+                    userStopped: self.userStopped,
+                    pythonArguments: pythonArguments
+                )
+                self.userStopped = false
+                self.label = state.label
+                self.errorMessage = state.errorMessage
+                if state.recordSuccessfulCheck {
+                    self.lastSuccessfulCheck = Date()
                 }
                 self.releasePipes()
             }
@@ -136,6 +154,7 @@ final class PipelineRunner {
 
     func stop() {
         guard let process, process.isRunning else { return }
+        userStopped = true
         append("\n[Stopping at your request…]\n")
         process.interrupt()
     }

@@ -519,6 +519,36 @@ final class AutoNovelStudioTests: XCTestCase {
         XCTAssertEqual(environment["PATH"], "/usr/bin")
     }
 
+    @MainActor
+    func testUserStopIsNotReportedAsCommandFailure() {
+        let interrupted = PipelineRunner.finishState(
+            terminationStatus: 130,
+            userStopped: true,
+            pythonArguments: ["run_pipeline.py"]
+        )
+        XCTAssertEqual(interrupted.label, "Stopped")
+        XCTAssertNil(interrupted.errorMessage)
+        XCTAssertFalse(interrupted.recordSuccessfulCheck)
+
+        let crashed = PipelineRunner.finishState(
+            terminationStatus: 1,
+            userStopped: false,
+            pythonArguments: ["run_pipeline.py"]
+        )
+        XCTAssertEqual(crashed.label, "Failed")
+        XCTAssertEqual(crashed.errorMessage, "The command exited with code 1.")
+        XCTAssertFalse(crashed.recordSuccessfulCheck)
+
+        let check = PipelineRunner.finishState(
+            terminationStatus: 0,
+            userStopped: false,
+            pythonArguments: ["check_llm.py"]
+        )
+        XCTAssertEqual(check.label, "Finished")
+        XCTAssertNil(check.errorMessage)
+        XCTAssertTrue(check.recordSuccessfulCheck)
+    }
+
     func testProcessEnvironmentPrependsResolvedUVDirectoryToPATH() {
         let uvDirectory = "/tmp/fake-uv-bin"
         let environment = PipelineRunner.processEnvironment(
