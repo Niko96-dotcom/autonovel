@@ -22,10 +22,16 @@ extension FocusedValues {
 
 struct StudioCommands: Commands {
     @Bindable var store: StudioStore
+    @Environment(\.openWindow) private var openWindow
     @FocusedValue(\.studioSaveAction) private var saveAction
 
     var body: some Commands {
         CommandGroup(after: .newItem) {
+            Button("New Window") {
+                openWindow(id: "studio-main")
+            }
+            .keyboardShortcut("n")
+
             Button("Save") { saveAction?() }
                 .keyboardShortcut("s")
                 .disabled(saveAction == nil)

@@ -12,7 +12,6 @@ struct ContentView: View {
             detail
                 .id(store.selection)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(nsColor: .windowBackgroundColor))
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -67,7 +66,7 @@ struct ContentView: View {
             AdvancedDocumentsView(store: store)
         case .activity:
             ActivityView(store: store)
-        default:
+        case .seed, .world, .characters, .voice, .outline, .canon, .mystery:
             if let document = BookDocument.forSection(store.selection) {
                 DocumentEditorView(store: store, document: document)
                     .id(document.id)
